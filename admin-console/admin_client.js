@@ -9,3 +9,8 @@ const client = new net.Socket();
 client.connect(PORT, HOST, () => {
     console.log('Admin conectado');
 });
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
