@@ -27,3 +27,19 @@ client.on('close', () => {
     rl.close();
     process.exit();
 });
+
+rl.on('line', (input) => {
+
+    const comando = input.trim().toUpperCase();
+
+    switch (comando) {
+
+        case 'HELP':
+            console.log('Ayuda');
+            break;
+
+        case 'EXIT':
+            client.destroy();
+            break;
+    }
+});
