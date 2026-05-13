@@ -14,3 +14,7 @@ const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
+
+client.on('data', (data) => {
+    console.log(data.toString());
+});
