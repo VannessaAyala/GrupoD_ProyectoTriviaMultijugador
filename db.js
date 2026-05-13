@@ -74,7 +74,62 @@ async function crearTablas() {
     }
 }
 
+async function insertarJugador(nombre) {
+    try {
+        const db = await conectarDB();
+        const existe = await db.request()
+            .input('nombre', sql.VarChar, nombre)
+            .query('SELECT 1 FROM Jugadores WHERE Nombre = @nombre');
+
+        if (existe.recordset.length === 0) {
+            await db.request()
+                .input('nombre', sql.VarChar, nombre)
+                .query('INSERT INTO Jugadores (Nombre) VALUES (@nombre)');
+            console.log(`Jugador registrado: ${nombre}`);
+        }
+    } catch (error) {
+        console.error('Error al insertar jugador:', error.message);
+    }
+}
+
+async function obtenerJugadores() {
+    try {
+        const db = await conectarDB();
+        const result = await db.request().query('SELECT Nombre, Puntos FROM Jugadores ORDER BY Puntos DESC');
+        return result.recordset;
+    } catch (error) {
+        console.error('Error al obtener jugadores:', error.message);
+        return [];
+    }
+}
+
+async function actualizarPuntos(nombre, puntos) {
+    try {
+        const db = await conectarDB();
+        await db.request()
+            .input('nombre', sql.VarChar, nombre)
+            .input('puntos', sql.Int, puntos)
+            .query('UPDATE Jugadores SET Puntos = @puntos WHERE Nombre = @nombre');
+    } catch (error) {
+        console.error('Error al actualizar puntos:', error.message);
+    }
+}
+
+async function resetearPuntos() {
+    try {
+        const db = await conectarDB();
+        await db.request().query('UPDATE Jugadores SET Puntos = 0');
+        console.log('Puntajes reiniciados');
+    } catch (error) {
+        console.error('Error al resetear puntos:', error.message);
+    }
+}
+
 module.exports = {
     conectarDB,
-    crearTablas
+    crearTablas,
+    insertarJugador,
+    obtenerJugadores,
+    actualizarPuntos,
+    resetearPuntos
 };
