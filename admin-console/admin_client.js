@@ -18,3 +18,12 @@ const rl = readline.createInterface({
 client.on('data', (data) => {
     console.log(data.toString());
 });
+
+client.on('error', (err) => {
+    console.log(err.message);
+});
+
+client.on('close', () => {
+    rl.close();
+    process.exit();
+});
