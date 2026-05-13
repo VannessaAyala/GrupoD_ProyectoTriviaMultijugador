@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const net = require('net');
 const { Server } = require('socket.io');
 const db = require('./db');
 
@@ -8,7 +9,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Estado global del juego
 let players = [];
 let questionIndex = 0;
 let gameRunning = false;
@@ -32,10 +32,8 @@ const questions = [
     }
 ];
 
-// Servir archivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Funciones auxiliares
 function getSafePlayers() {
     return players.map(p => ({
         nombre: String(p.nombre || 'Jugador'),
@@ -49,7 +47,36 @@ function broadcastPlayers() {
     io.emit('ranking', data);
 }
 
-// Gestión de conexiones Socket.io
+function sendQuestion() {
+    if (!gameRunning) return;
+
+    if (questionIndex >= questions.length) {
+        gameRunning = false;
+        clearInterval(timer);
+        io.emit('game_over', getSafePlayers());
+        console.log('Juego finalizado');
+        return;
+    }
+
+    const question = questions[questionIndex];
+    let time = 15;
+
+    io.emit('enviar_pregunta', question);
+    io.emit('timer', time);
+    console.log(`Pregunta ${questionIndex + 1}`);
+
+    timer = setInterval(() => {
+        time--;
+        io.emit('timer', time);
+
+        if (time <= 0) {
+            clearInterval(timer);
+            questionIndex++;
+            setTimeout(sendQuestion, 2000);
+        }
+    }, 1000);
+}
+
 io.on('connection', (socket) => {
     console.log(`Usuario conectado: ${socket.id}`);
 
@@ -95,12 +122,71 @@ io.on('connection', (socket) => {
     });
 });
 
-// Función de inicio de servidor (Base)
+const tcpServer = net.createServer((socket) => {
+    console.log('Admin conectado');
+    socket.write('ADMIN PANEL READY\n');
+
+    socket.on('data', async (data) => {
+        const command = data.toString().trim().toUpperCase();
+
+        if (command === 'START') {
+            if (gameRunning) {
+                socket.write('Aviso: El juego ya esta iniciado\n');
+                return;
+            }
+            questionIndex = 0;
+            gameRunning = true;
+            clearInterval(timer);
+            players.forEach(p => p.puntos = 0);
+            await db.resetearPuntos();
+            broadcastPlayers();
+            io.emit('game_started');
+            socket.write('Juego iniciado\n');
+            setTimeout(sendQuestion, 2000);
+        } else if (command === 'PLAYERS') {
+            if (players.length === 0) {
+                socket.write('No hay jugadores conectados\n');
+                return;
+            }
+            let text = '\n===== JUGADORES =====\n';
+            players.forEach((p, i) => {
+                text += `${i + 1}. ${p.nombre} (${p.puntos} pts)\n`;
+            });
+            text += '=====================\n';
+            socket.write(text);
+        } else if (command === 'STATUS') {
+            socket.write(`
+=========================
+ESTADO DEL SERVIDOR
+=========================
+Juego activo: ${gameRunning ? 'SI' : 'NO'}
+Jugadores: ${players.length}
+Pregunta actual: ${questionIndex + 1}
+=========================\n`);
+        } else if (command === 'RESET') {
+            gameRunning = false;
+            questionIndex = 0;
+            clearInterval(timer);
+            players.forEach(p => p.puntos = 0);
+            await db.resetearPuntos();
+            broadcastPlayers();
+            socket.write('Juego reiniciado\n');
+        } else {
+            socket.write('Error: Comando invalido\n');
+        }
+    });
+
+    socket.on('close', () => console.log('Admin desconectado'));
+});
+
 async function startServer() {
     try {
         await db.crearTablas();
         server.listen(3000, () => {
-            console.log('HTTP Server ejecutándose en http://localhost:3000');
+            console.log('HTTP Server en http://localhost:3000');
+        });
+        tcpServer.listen(4000, () => {
+            console.log('Admin TCP Server en puerto 4000');
         });
     } catch (error) {
         console.error('Error al iniciar el servidor:', error.message);
