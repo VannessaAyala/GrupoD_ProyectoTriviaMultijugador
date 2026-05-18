@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0">
+
+    <title>Trivia Live - Login</title>
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+        rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="../css/style.css">
+
+</head>
+
+<body>
+
+    <div class="container py-5">
+
+        <div class="main-card">
+
+            <!-- HERO -->
+            <div class="title text-center mb-5">
+
+                <h1>
+                    🎮 TRIVIA LIVE
+                </h1>
+
+                <p>
+                    Juego multijugador en tiempo real
+                </p>
+
+            </div>
+
+            <!-- LOGIN CARD -->
+            <div class="panel mx-auto"
+                style="max-width:650px;">
+
+                <div class="text-center mb-5">
+
+                    <div class="timer-container mx-auto mb-4"
+                        style="width:160px;height:160px;">
+
+                        <div style="
+                            width:100%;
+                            height:100%;
+                            display:flex;
+                            justify-content:center;
+                            align-items:center;
+                            font-size:70px;
+                        ">
+                            🎯
+                        </div>
+
+                    </div>
+
+                    <h2>
+                        Iniciar sesión
+                    </h2>
+
+                    <p class="text-secondary fs-5 mt-3">
+
+                        Ingresa tu nombre para unirte
+                        a la partida
+
+                    </p>
+
+                </div>
+
+                <!-- FORM -->
+                <form id="loginForm">
+
+                    <!-- NOMBRE -->
+                    <div class="mb-4">
+
+                        <label class="form-label fs-5 mb-3">
+
+                            <i class="fa-solid fa-user"></i>
+
+                            Nombre del jugador
+
+                        </label>
+
+                        <input type="text"
+                            id="nombre"
+                            class="form-control form-control-lg"
+                            placeholder="Ejemplo: Irving"
+                            autocomplete="off"
+                            maxlength="15">
+
+                    </div>
+
+                    <!-- SALA -->
+                    <div class="mb-4">
+
+                        <label class="form-label fs-5 mb-3">
+
+                            <i class="fa-solid fa-key"></i>
+
+                            Código de sala
+
+                        </label>
+
+                        <input type="text"
+                            id="codigoSala"
+                            class="form-control form-control-lg"
+                            placeholder="Ejemplo: 1234"
+                            autocomplete="off">
+
+                    </div>
+
+                    <!-- BOTÓN -->
+                    <button type="submit"
+                        class="btn btn-primary w-100 py-3 fs-4">
+
+                        <i class="fa-solid fa-gamepad"></i>
+
+                        ENTRAR AL JUEGO
+
+                    </button>
+
+                </form>
+
+                <!-- STATUS -->
+                <div id="loginStatus"
+                    class="mt-4">
+
+                </div>
+
+            </div>
+
+            <!-- FEATURES -->
+            <div class="row mt-5 g-4">
+
+                <!-- REALTIME -->
+                <div class="col-md-4">
+
+                    <div class="panel text-center h-100">
+
+                        <h1>
+                            ⚡
+                        </h1>
+
+                        <h3 class="mt-3">
+                            Tiempo real
+                        </h3>
+
+                        <p class="text-secondary mt-3">
+
+                            Comunicación instantánea
+                            con Socket.IO
+
+                        </p>
+
+                    </div>
+
+                </div>
+
+                <!-- RANKING -->
+                <div class="col-md-4">
+
+                    <div class="panel text-center h-100">
+
+                        <h1>
+                            🏆
+                        </h1>
+
+                        <h3 class="mt-3">
+                            Ranking en vivo
+                        </h3>
+
+                        <p class="text-secondary mt-3">
+
+                            Compite contra otros
+                            jugadores
+
+                        </p>
+
+                    </div>
+
+                </div>
+
+                <!-- SPEED -->
+                <div class="col-md-4">
+
+                    <div class="panel text-center h-100">
+
+                        <h1>
+                            🎯
+                        </h1>
+
+                        <h3 class="mt-3">
+                            Velocidad
+                        </h3>
+
+                        <p class="text-secondary mt-3">
+
+                            Responde rápido para
+                            ganar más puntos
+
+                        </p>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- SCRIPT -->
+    <script>
+
+        // ======================================================
+        // ELEMENTOS
+        // ======================================================
+
+        const form =
+            document.getElementById('loginForm');
+
+        const nombreInput =
+            document.getElementById('nombre');
+
+        const codigoSalaInput =
+            document.getElementById('codigoSala');
+
+        const statusDiv =
+            document.getElementById('loginStatus');
+
+        // ======================================================
+        // VALIDAR NOMBRE
+        // ======================================================
+
+        function validarNombre(nombre) {
+
+            nombre = nombre.trim();
+
+            if (nombre.length < 3) {
+
+                mostrarError(
+                    'El nombre debe tener mínimo 3 caracteres'
+                );
+
+                return false;
+            }
+
+            if (nombre.length > 15) {
+
+                mostrarError(
+                    'Máximo 15 caracteres'
+                );
+
+                return false;
+            }
+
+            const regex = /^[a-zA-Z0-9_ ]+$/;
+
+            if (!regex.test(nombre)) {
+
+                mostrarError(
+                    'Caracteres inválidos'
+                );
+
+                return false;
+            }
+
+            return true;
+        }
+
+        // ======================================================
+        // ERROR
+        // ======================================================
+
+        function mostrarError(msg) {
+
+            statusDiv.innerHTML = `
+
+                <div class="alert alert-danger text-center">
+
+                    ${msg}
+
+                </div>
+            `;
+        }
+
+        // ======================================================
+        // INFO
+        // ======================================================
+
+        function mostrarInfo(msg) {
+
+            statusDiv.innerHTML = `
+
+                <div class="alert alert-success text-center">
+
+                    ${msg}
+
+                </div>
+            `;
+        }
+
+        // ======================================================
+        // LOGIN
+        // ======================================================
+
+        form.addEventListener('submit', (e) => {
+
+            e.preventDefault();
+
+            const nombre =
+                nombreInput.value.trim();
+
+            const codigo =
+                codigoSalaInput.value.trim();
+
+            // VALIDAR
+            if (!validarNombre(nombre)) return;
+
+            if (codigo.length < 3) {
+
+                mostrarError(
+                    'Código inválido'
+                );
+
+                return;
+            }
+
+            // GUARDAR PLAYER
+            localStorage.setItem(
+                'trivia_player',
+                JSON.stringify({
+
+                    nombre: nombre,
+
+                    sala: codigo
+                })
+            );
+
+            mostrarInfo(
+                'Ingresando al lobby...'
+            );
+
+            // REDIRECT
+            setTimeout(() => {
+
+                window.location.href =
+                    '/views/lobby.html';
+
+            }, 1000);
+        });
+
+        // ======================================================
+        // AUTO LOGIN
+        // ======================================================
+
+        window.addEventListener('DOMContentLoaded', () => {
+
+            try {
+
+                const data =
+                    localStorage.getItem('trivia_player');
+
+                if (!data) return;
+
+                const player =
+                    JSON.parse(data);
+
+                if (player?.nombre) {
+
+                    nombreInput.value =
+                        player.nombre;
+                }
+
+            } catch (error) {
+
+                console.log(error);
+            }
+        });
+
+    </script>
+
+</body>
+
+</html>

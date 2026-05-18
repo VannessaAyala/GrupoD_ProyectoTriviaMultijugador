@@ -1,11 +1,12 @@
 const { Pool } = require('pg');
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:123@localhost:5432/trivia_db';
+
 const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'trivia_db',
-  user: 'postgres',
-  password: '123',
+  connectionString: connectionString,
+  ssl: isProduction ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000
 });
