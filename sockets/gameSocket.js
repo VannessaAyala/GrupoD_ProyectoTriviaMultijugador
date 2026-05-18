@@ -62,7 +62,10 @@ function initGameSocket(io) {
           estado: 'lobby'
         });
 
+<<<<<<< HEAD
         console.log(`[SALA CREADA] Código: ${codigo}, ID: ${sala_id}, AdminSocket: ${socket.id}`);
+=======
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
         socket.join(codigo);
         socket.roomCode = codigo;
         socket.isAdmin = true;
@@ -90,13 +93,19 @@ function initGameSocket(io) {
 
         const roomState = roomStates.get(code);
         if (!roomState) {
+<<<<<<< HEAD
           console.log(`[JOIN ERROR] Sala no encontrada: ${code}`);
+=======
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
           socket.emit('join_error', { mensaje: 'Sala no encontrada' });
           return;
         }
 
+<<<<<<< HEAD
         console.log(`[JOIN TRY] User: ${nick}, Room: ${code}, Socket: ${socket.id}`);
 
+=======
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
         let jugadorExistente = null;
         for (const [oldSocketId, player] of roomState.players) {
           if (player.nickname.toLowerCase() === nick.toLowerCase()) {
@@ -126,6 +135,7 @@ function initGameSocket(io) {
             [socket.id, player.jugador_id]
           );
 
+<<<<<<< HEAD
           console.log(`[PLAYER RECONNECTED] User: ${nick}, Room: ${code}, NewSocket: ${socket.id}`);
           socket.emit('join_success', { nickname: nick, roomCode: code });
 
@@ -147,6 +157,9 @@ function initGameSocket(io) {
             };
             socket.emit('question', pData);
           }
+=======
+          socket.emit('join_success', { nickname: nick, roomCode: code });
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
           return;
         }
 
@@ -193,17 +206,24 @@ function initGameSocket(io) {
           return;
         }
 
+<<<<<<< HEAD
         console.log(`[GAME STARTING] Room: ${roomCode}, Quiz: ${roomState.quiz_id}`);
+=======
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
         const result = await query('INSERT INTO partidas (sala_id, pregunta_actual) VALUES ($1, 0) RETURNING id', [roomState.sala_id]);
         roomState.partida_id = result.rows[0].id;
         await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', roomState.sala_id]);
         roomState.estado = 'jugando';
 
+<<<<<<< HEAD
         const playersArray = getPlayersArray(roomState);
         io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
         io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
         
         addLogToAdmin(io, roomState, "La partida ha comenzado. Esperando que los jugadores carguen la pantalla...");
+=======
+        io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
       } catch (err) {
         console.error('Error start_game:', err.message);
       }
@@ -241,6 +261,7 @@ function initGameSocket(io) {
           tiempo_segundos: pregunta.tiempo_segundos
         };
 
+<<<<<<< HEAD
         console.log(`[ENVIANDO PREGUNTA] Sala: ${roomCode}, Indice: ${idx}`);
         
         // Enviar a todos en la sala (incluyendo admin y jugadores)
@@ -251,6 +272,10 @@ function initGameSocket(io) {
           respuestaCorrecta: pregunta.correcta, 
           pregunta_id: pregunta.id 
         });
+=======
+        io.to(roomState.adminSocketId).emit('question', { ...pData, respuestaCorrecta: pregunta.correcta, pregunta_id: pregunta.id });
+        socket.broadcast.to(roomCode).emit('question', pData);
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
 
         let s = pregunta.tiempo_segundos;
         roomState.timerInterval = setInterval(async () => {
@@ -358,12 +383,15 @@ function getPlayersArray(roomState) {
   return players;
 }
 
+<<<<<<< HEAD
 function addLogToAdmin(io, roomState, msg) {
   if (roomState && roomState.adminSocketId) {
     io.to(roomState.adminSocketId).emit('log_message', { msg });
   }
 }
 
+=======
+>>>>>>> 4dab6f55af1a182641b4ed95700c4d7e0aeea118
 async function revelarRespuesta(io, roomCode, roomState, pregunta) {
   io.to(roomCode).emit('question_result', { respuestaCorrecta: pregunta.correcta, leaderboard: getLeaderboard(roomState) });
 }
