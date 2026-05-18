@@ -251,6 +251,14 @@
       addLog('Partida iniciada');
     });
 
+    socket.on('room_update', ({ players }) => {
+      actualizarJugadores(players);
+    });
+
+    socket.on('log_message', ({ msg }) => {
+      addLog(msg);
+    });
+
     document.getElementById('btnSiguiente').addEventListener('click', () => {
       if (currentRoomCode) socket.emit('next_question', { roomCode: currentRoomCode });
     });
@@ -259,6 +267,11 @@
       document.getElementById('preguntaProgreso').textContent = `${data.numero} / ${data.total}`;
       document.getElementById('preguntaAdminPanel').textContent = data.texto;
       addLog(`Pregunta ${data.numero} enviada`);
+    });
+
+    socket.on('admin_question_info', ({ respuestaCorrecta, pregunta_id }) => {
+      console.log('Info de pregunta recibida:', respuestaCorrecta);
+      // Aquí podrías guardar la respuesta correcta si el admin la necesita mostrar antes de tiempo
     });
 
     socket.on('answers_update', ({ respondidos, total }) => {

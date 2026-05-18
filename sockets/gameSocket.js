@@ -62,6 +62,7 @@ function initGameSocket(io) {
           estado: 'lobby'
         });
 
+        console.log(`[SALA CREADA] Código: ${codigo}, ID: ${sala_id}, AdminSocket: ${socket.id}`);
         socket.join(codigo);
         socket.roomCode = codigo;
         socket.isAdmin = true;
@@ -89,9 +90,12 @@ function initGameSocket(io) {
 
         const roomState = roomStates.get(code);
         if (!roomState) {
+          console.log(`[JOIN ERROR] Sala no encontrada: ${code}`);
           socket.emit('join_error', { mensaje: 'Sala no encontrada' });
           return;
         }
+
+        console.log(`[JOIN TRY] User: ${nick}, Room: ${code}, Socket: ${socket.id}`);
 
         let jugadorExistente = null;
         for (const [oldSocketId, player] of roomState.players) {
@@ -122,7 +126,27 @@ function initGameSocket(io) {
             [socket.id, player.jugador_id]
           );
 
+          console.log(`[PLAYER RECONNECTED] User: ${nick}, Room: ${code}, NewSocket: ${socket.id}`);
           socket.emit('join_success', { nickname: nick, roomCode: code });
+
+          // Notificar al admin que el jugador volvió (crucial para que no parezca desconectado)
+          const playersArray = getPlayersArray(roomState);
+          io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+
+          // Si ya hay una pregunta activa, enviársela de inmediato al jugador que reconecta
+          if (roomState.currentQuestionIndex >= 0 && roomState.currentQuestionIndex < roomState.preguntas.length) {
+            const pregunta = roomState.preguntas[roomState.currentQuestionIndex];
+            const pData = {
+              numero: roomState.currentQuestionIndex + 1,
+              total: roomState.preguntas.length,
+              texto: pregunta.texto,
+              opciones: { A: pregunta.opcion_a, B: pregunta.opcion_b, C: pregunta.opcion_c, D: pregunta.opcion_d },
+              categoria: pregunta.categoria,
+              dificultad: pregunta.dificultad,
+              tiempo_segundos: Math.max(0, Math.floor((roomState.tiempoLimiteMsActual - (Date.now() - roomState.timerStartedAt)) / 1000))
+            };
+            socket.emit('question', pData);
+          }
           return;
         }
 
@@ -169,12 +193,17 @@ function initGameSocket(io) {
           return;
         }
 
+        console.log(`[GAME STARTING] Room: ${roomCode}, Quiz: ${roomState.quiz_id}`);
         const result = await query('INSERT INTO partidas (sala_id, pregunta_actual) VALUES ($1, 0) RETURNING id', [roomState.sala_id]);
         roomState.partida_id = result.rows[0].id;
         await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', roomState.sala_id]);
         roomState.estado = 'jugando';
 
+        const playersArray = getPlayersArray(roomState);
         io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
+        io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+        
+        addLogToAdmin(io, roomState, "La partida ha comenzado. Esperando que los jugadores carguen la pantalla...");
       } catch (err) {
         console.error('Error start_game:', err.message);
       }
@@ -212,8 +241,16 @@ function initGameSocket(io) {
           tiempo_segundos: pregunta.tiempo_segundos
         };
 
-        io.to(roomState.adminSocketId).emit('question', { ...pData, respuestaCorrecta: pregunta.correcta, pregunta_id: pregunta.id });
-        socket.broadcast.to(roomCode).emit('question', pData);
+        console.log(`[ENVIANDO PREGUNTA] Sala: ${roomCode}, Indice: ${idx}`);
+        
+        // Enviar a todos en la sala (incluyendo admin y jugadores)
+        io.to(roomCode).emit('question', pData);
+        
+        // Enviar info extra solo al admin (como la respuesta correcta)
+        io.to(roomState.adminSocketId).emit('admin_question_info', { 
+          respuestaCorrecta: pregunta.correcta, 
+          pregunta_id: pregunta.id 
+        });
 
         let s = pregunta.tiempo_segundos;
         roomState.timerInterval = setInterval(async () => {
@@ -319,6 +356,12 @@ function getPlayersArray(roomState) {
     players.push({ nickname: player.nickname, puntaje: player.puntaje, conectado: player.conectado });
   }
   return players;
+}
+
+function addLogToAdmin(io, roomState, msg) {
+  if (roomState && roomState.adminSocketId) {
+    io.to(roomState.adminSocketId).emit('log_message', { msg });
+  }
 }
 
 async function revelarRespuesta(io, roomCode, roomState, pregunta) {
