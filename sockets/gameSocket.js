@@ -89,9 +89,12 @@ function initGameSocket(io) {
 
         const roomState = roomStates.get(code);
         if (!roomState) {
+          console.log(`[JOIN ERROR] Sala no encontrada: ${code}`);
           socket.emit('join_error', { mensaje: 'Sala no encontrada' });
           return;
         }
+
+        console.log(`[JOIN TRY] User: ${nick}, Room: ${code}, Socket: ${socket.id}`);
 
         let jugadorExistente = null;
         for (const [oldSocketId, player] of roomState.players) {
@@ -122,6 +125,7 @@ function initGameSocket(io) {
             [socket.id, player.jugador_id]
           );
 
+          console.log(`[PLAYER RECONNECTED] User: ${nick}, Room: ${code}, NewSocket: ${socket.id}`);
           socket.emit('join_success', { nickname: nick, roomCode: code });
 
           // Notificar al admin que el jugador volvió
@@ -188,12 +192,17 @@ function initGameSocket(io) {
           return;
         }
 
+        console.log(`[GAME STARTING] Room: ${roomCode}, Quiz: ${roomState.quiz_id}`);
         const result = await query('INSERT INTO partidas (sala_id, pregunta_actual) VALUES ($1, 0) RETURNING id', [roomState.sala_id]);
         roomState.partida_id = result.rows[0].id;
         await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', roomState.sala_id]);
         roomState.estado = 'jugando';
 
+        const playersArray = getPlayersArray(roomState);
         io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
+        io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+        
+        addLogToAdmin(io, roomState, "La partida ha comenzado. Esperando que los jugadores carguen la pantalla...");
       } catch (err) {
         console.error('Error start_game:', err.message);
       }
@@ -344,6 +353,12 @@ function getPlayersArray(roomState) {
     players.push({ nickname: player.nickname, puntaje: player.puntaje, conectado: player.conectado });
   }
   return players;
+}
+
+function addLogToAdmin(io, roomState, msg) {
+  if (roomState && roomState.adminSocketId) {
+    io.to(roomState.adminSocketId).emit('log_message', { msg });
+  }
 }
 
 async function revelarRespuesta(io, roomCode, roomState, pregunta) {
