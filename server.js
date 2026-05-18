@@ -58,8 +58,7 @@ app.get('/player/results', (req, res) => {
 
 initGameSocket(io);
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Servidor corriendo en puerto ' + PORT);
-  console.log('Admin: http://localhost:' + PORT + '/admin/login');
 });

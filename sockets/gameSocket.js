@@ -123,6 +123,25 @@ function initGameSocket(io) {
           );
 
           socket.emit('join_success', { nickname: nick, roomCode: code });
+
+          // Notificar al admin que el jugador volvió
+          const playersArray = getPlayersArray(roomState);
+          io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+
+          // Si ya hay una pregunta activa, enviársela de inmediato
+          if (roomState.currentQuestionIndex >= 0 && roomState.currentQuestionIndex < roomState.preguntas.length) {
+            const pregunta = roomState.preguntas[roomState.currentQuestionIndex];
+            const pData = {
+              numero: roomState.currentQuestionIndex + 1,
+              total: roomState.preguntas.length,
+              texto: pregunta.texto,
+              opciones: { A: pregunta.opcion_a, B: pregunta.opcion_b, C: pregunta.opcion_c, D: pregunta.opcion_d },
+              categoria: pregunta.categoria,
+              dificultad: pregunta.dificultad,
+              tiempo_segundos: Math.max(0, Math.floor((roomState.tiempoLimiteMsActual - (Date.now() - roomState.timerStartedAt)) / 1000))
+            };
+            socket.emit('question', pData);
+          }
           return;
         }
 
@@ -212,8 +231,14 @@ function initGameSocket(io) {
           tiempo_segundos: pregunta.tiempo_segundos
         };
 
-        io.to(roomState.adminSocketId).emit('question', { ...pData, respuestaCorrecta: pregunta.correcta, pregunta_id: pregunta.id });
-        socket.broadcast.to(roomCode).emit('question', pData);
+        // Enviar a todos en la sala (incluyendo admin y jugadores)
+        io.to(roomCode).emit('question', pData);
+        
+        // Info extra para admin
+        io.to(roomState.adminSocketId).emit('admin_question_info', { 
+          respuestaCorrecta: pregunta.correcta, 
+          pregunta_id: pregunta.id 
+        });
 
         let s = pregunta.tiempo_segundos;
         roomState.timerInterval = setInterval(async () => {
