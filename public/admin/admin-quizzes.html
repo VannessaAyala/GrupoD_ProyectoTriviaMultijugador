@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Gestión de Quizzes</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .page-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 750px) {
+      .page-grid { grid-template-columns: 1fr; }
+    }
+    textarea.aiken-input {
+      width: 100%;
+      min-height: 340px;
+      background: #1a0a2e;
+      border: 2px solid rgba(167,139,250,0.2);
+      border-radius: var(--radius-sm);
+      color: #e2d9f3;
+      font-family: monospace;
+      padding: 16px;
+      resize: vertical;
+    }
+    .preview-card {
+      background: var(--color-surface);
+      border: 1px solid rgba(167,139,250,0.15);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-bottom: 8px;
+    }
+    .quiz-list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: var(--color-surface);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+    }
+    .btn-delete {
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container-wide">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-top: 20px;">
+      <div>
+        <h1 style="font-size: 1.8rem;">Gestión de Quizzes</h1>
+      </div>
+      <a href="/admin/dashboard" style="color: var(--color-text-muted); font-size: 0.85rem; text-decoration: none;">Volver al dashboard</a>
+    </div>
+
+    <div class="page-grid">
+      <div>
+        <div class="card" style="margin-bottom: 16px;">
+          <h3 style="margin-bottom: 16px;">Crear nuevo quiz</h3>
+          <div style="margin-bottom: 14px;">
+            <label>Nombre del quiz</label>
+            <input type="text" id="quizNombre" class="input">
+          </div>
+          <div style="margin-bottom: 14px;">
+            <label>Descripción</label>
+            <input type="text" id="quizDescripcion" class="input">
+          </div>
+          <div style="margin-bottom: 14px;">
+            <label>Formato Aiken</label>
+            <textarea id="aikenInput" class="aiken-input"></textarea>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" id="btnPrevisualizar" style="flex: 1;">Previsualizar</button>
+            <button class="btn btn-green" id="btnGuardar" disabled style="flex: 1;">Guardar quiz</button>
+          </div>
+          <div id="mensajeGuardado" class="alert" style="margin-top: 12px;"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom: 16px;">
+          <h3 style="font-size: 1rem;">Vista previa</h3>
+          <div id="previewContainer"></div>
+        </div>
+        <div class="card" style="margin-bottom: 16px;">
+          <h3 style="font-size: 1rem;">Quizzes guardados</h3>
+          <div id="quizzesGuardados"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function parseAiken(texto) {
+      const preguntas = [];
+      const bloques = texto.trim().split(/\n\s*\n/);
+      bloques.forEach(bloque => {
+        const lineas = bloque.trim().split('\n').map(l => l.trim()).filter(l => l);
+        if (lineas.length < 5) return;
+        const pregunta = { texto: lineas[0], opcion_a: '', opcion_b: '', opcion_c: '', opcion_d: '', correcta: '', categoria: 'General', dificultad: 'media', tiempo_segundos: 20 };
+        lineas.forEach(l => {
+          if (l.startsWith('A.')) pregunta.opcion_a = l.substring(2).trim();
+          else if (l.startsWith('B.')) pregunta.opcion_b = l.substring(2).trim();
+          else if (l.startsWith('C.')) pregunta.opcion_c = l.substring(2).trim();
+          else if (l.startsWith('D.')) pregunta.opcion_d = l.substring(2).trim();
+          else if (l.startsWith('ANSWER:')) pregunta.correcta = l.substring(7).trim();
+        });
+        if (pregunta.correcta) preguntas.push(pregunta);
+      });
+      return { preguntas, errores: [] };
+    }
+
+    let preguntasParsedas = [];
+    document.getElementById('btnPrevisualizar').addEventListener('click', () => {
+      const { preguntas } = parseAiken(document.getElementById('aikenInput').value);
+      preguntasParsedas = preguntas;
+      const container = document.getElementById('previewContainer');
+      container.innerHTML = preguntas.map(p => `<div class="preview-card"><strong>${p.texto}</strong></div>`).join('');
+      document.getElementById('btnGuardar').disabled = preguntas.length === 0;
+    });
+
+    document.getElementById('btnGuardar').addEventListener('click', async () => {
+      const nombre = document.getElementById('quizNombre').value.trim();
+      const res = await fetch('/admin/api/quizzes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, descripcion: document.getElementById('quizDescripcion').value, preguntas: preguntasParsedas })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Guardado');
+        cargarQuizzes();
+      }
+    });
+
+    async function cargarQuizzes() {
+      const res = await fetch('/admin/api/quizzes');
+      const data = await res.json();
+      document.getElementById('quizzesGuardados').innerHTML = data.quizzes.map(q => `
+        <div class="quiz-list-item">
+          <span>${q.nombre}</span>
+          <button class="btn-delete" onclick="eliminarQuiz(${q.id})">Borrar</button>
+        </div>
+      `).join('');
+    }
+
+    async function eliminarQuiz(id) {
+      if (confirm('¿Eliminar?')) {
+        await fetch(`/admin/api/quizzes/${id}`, { method: 'DELETE' });
+        cargarQuizzes();
+      }
+    }
+
+    cargarQuizzes();
+  </script>
+</body>
+</html>

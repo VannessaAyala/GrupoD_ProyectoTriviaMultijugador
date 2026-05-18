@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trivia - Lobby</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="padding-top: 40px;">
+    <div class="logo">
+      <h1>Trivia!</h1>
+    </div>
+
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+          <p class="text-muted" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Código de sala</p>
+          <h2 style="font-size: 2rem; letter-spacing: 4px; color: var(--color-accent-light);" id="displayCode">------</h2>
+        </div>
+        <div class="badge badge-green" id="statusBadge">Esperando...</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="card-sm" style="margin-bottom: 20px; text-align: center;">
+        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 4px;">Tu nickname</p>
+        <h3 style="font-size: 1.4rem; color: var(--color-primary-light);" id="displayNick">...</h3>
+      </div>
+
+      <div>
+        <p style="font-weight: 700; margin-bottom: 12px; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">
+          Jugadores en sala (<span id="playerCount">0</span>)
+        </p>
+        <div id="playersList" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 40px;">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div id="waitingMsg" style="text-align: center; color: var(--color-text-muted);">
+        <p style="font-size: 1.1rem;">Esperando que el admin inicie...</p>
+        <div class="loading-dots" style="margin-top: 12px;">
+          <span style="animation: blink 1.2s infinite 0s">.</span>
+          <span style="animation: blink 1.2s infinite 0.4s">.</span>
+          <span style="animation: blink 1.2s infinite 0.8s">.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes blink {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 1; }
+    }
+    .loading-dots { display: flex; gap: 6px; justify-content: center; font-size: 1.5rem; color: var(--color-primary-light); }
+    .player-chip {
+      background: var(--color-surface);
+      border: 1px solid rgba(167,139,250,0.2);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      animation: popIn 0.3s ease;
+    }
+    @keyframes popIn {
+      from { transform: scale(0.7); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+  </style>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const nickname = sessionStorage.getItem('nickname');
+    const roomCode = sessionStorage.getItem('roomCode');
+
+    if (!nickname || !roomCode) {
+      window.location.href = '/';
+    }
+
+    document.getElementById('displayCode').textContent = roomCode;
+    document.getElementById('displayNick').textContent = nickname;
+
+    const socket = io();
+
+    socket.emit('join_room', { roomCode, nickname });
+
+    socket.on('join_error', ({ mensaje }) => {
+      alert('Error: ' + mensaje);
+      window.location.href = '/';
+    });
+
+    socket.on('player_joined', ({ players }) => {
+      actualizarListaJugadores(players);
+    });
+
+    socket.on('player_left', ({ players }) => {
+      actualizarListaJugadores(players);
+    });
+
+    socket.on('start_game', ({ totalPreguntas }) => {
+      sessionStorage.setItem('totalPreguntas', totalPreguntas);
+      window.location.href = '/player/game';
+    });
+
+    socket.on('admin_disconnected', ({ mensaje }) => {
+      alert(mensaje);
+      sessionStorage.clear();
+      window.location.href = '/';
+    });
+
+    function actualizarListaJugadores(players) {
+      const lista = document.getElementById('playersList');
+      const count = document.getElementById('playerCount');
+      const conectados = players.filter(p => p.conectado);
+      count.textContent = conectados.length;
+      lista.innerHTML = '';
+      conectados.forEach(p => {
+        const chip = document.createElement('div');
+        chip.className = 'player-chip';
+        chip.textContent = p.nickname;
+        lista.appendChild(chip);
+      });
+    }
+  </script>
+</body>
+</html>

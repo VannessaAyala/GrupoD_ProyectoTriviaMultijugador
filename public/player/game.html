@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trivia - Jugando</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div style="max-width: 600px; margin: 0 auto; padding: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div>
+        <p class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;">Puntaje</p>
+        <p style="font-family: 'Fredoka One', cursive; font-size: 1.8rem; color: var(--color-accent-light);" id="miPuntaje">0</p>
+      </div>
+      <div style="text-align: center;">
+        <p class="text-muted" style="font-size: 0.75rem;">Pregunta</p>
+        <p style="font-family: 'Fredoka One', cursive; font-size: 1.2rem;" id="progreso">- / -</p>
+      </div>
+      <div style="text-align: right;">
+        <p class="text-muted" style="font-size: 0.75rem;">Tiempo</p>
+        <p style="font-family: 'Fredoka One', cursive; font-size: 1.8rem; color: var(--color-green);" id="timerDisplay">--</p>
+      </div>
+    </div>
+
+    <div class="timer-bar-wrap">
+      <div class="timer-bar" id="timerBar" style="width: 100%;"></div>
+    </div>
+
+    <div id="pantallaEspera" class="card" style="text-align: center; padding: 60px 28px;">
+      <p style="font-size: 1.5rem; margin-bottom: 12px;">¡El juego ha comenzado!</p>
+      <p class="text-muted">Esperando la primera pregunta...</p>
+      <div style="margin-top: 20px; display: flex; gap: 6px; justify-content: center; font-size: 1.5rem; color: var(--color-primary-light);">
+        <span style="animation: blink 1.2s infinite 0s">.</span>
+        <span style="animation: blink 1.2s infinite 0.4s">.</span>
+        <span style="animation: blink 1.2s infinite 0.8s">.</span>
+      </div>
+    </div>
+
+    <div id="pantallaPregunta" class="hidden">
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;" id="preguntaMeta"></div>
+      <div class="card" style="margin-bottom: 16px; text-align: center; padding: 28px;">
+        <p style="font-size: 1.25rem; font-weight: 700; line-height: 1.5;" id="preguntaTexto">...</p>
+      </div>
+      <div class="options-grid" id="opcionesContainer"></div>
+    </div>
+
+    <div id="pantallaResultado" class="hidden">
+      <div class="card" style="text-align: center; padding: 40px 28px; margin-bottom: 16px;">
+        <div style="font-size: 4rem; margin-bottom: 16px;" id="resultEmoji"></div>
+        <h2 style="margin-bottom: 8px;" id="resultTitulo">...</h2>
+        <p class="text-muted" id="resultSubtitulo">...</p>
+        <div style="margin-top: 20px; padding: 16px; background: var(--color-surface); border-radius: var(--radius-sm);">
+          <p class="text-muted" style="font-size: 0.8rem;">Respuesta correcta</p>
+          <p style="font-size: 1.5rem; font-weight: 800; color: var(--color-green);" id="respuestaCorrectaDisplay">...</p>
+        </div>
+      </div>
+      <div class="card">
+        <p style="font-weight: 700; margin-bottom: 12px; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase;">Ranking actual</p>
+        <ul class="ranking-list" id="miniRanking"></ul>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes blink {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 1; }
+    }
+  </style>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const nickname = sessionStorage.getItem('nickname');
+    const roomCode = sessionStorage.getItem('roomCode');
+    const totalPreguntas = parseInt(sessionStorage.getItem('totalPreguntas') || '0');
+
+    if (!nickname || !roomCode) {
+      window.location.href = '/';
+    }
+
+    const socket = io();
+    let miPuntaje = 0;
+    let preguntaActual = 0;
+    let tiempoTotal = 20;
+    let segundosRestantes = 20;
+    let yaRespondio = false;
+    let miRespuesta = null;
+
+    socket.emit('join_room', { roomCode, nickname });
+
+    socket.on('question', (data) => {
+      preguntaActual = data.numero;
+      tiempoTotal = data.tiempo_segundos;
+      segundosRestantes = data.tiempo_segundos;
+      yaRespondio = false;
+      miRespuesta = null;
+
+      document.getElementById('progreso').textContent = `${data.numero} / ${data.total || totalPreguntas}`;
+      document.getElementById('timerDisplay').textContent = data.tiempo_segundos;
+      document.getElementById('timerBar').style.width = '100%';
+
+      document.getElementById('pantallaEspera').classList.add('hidden');
+      document.getElementById('pantallaResultado').classList.add('hidden');
+      document.getElementById('pantallaPregunta').classList.remove('hidden');
+
+      const meta = document.getElementById('preguntaMeta');
+      meta.innerHTML = `
+        <span class="badge badge-purple">${data.categoria}</span>
+        <span class="badge badge-${data.dificultad === 'facil' ? 'green' : data.dificultad === 'media' ? 'yellow' : 'purple'}">${data.dificultad}</span>
+      `;
+
+      document.getElementById('preguntaTexto').textContent = data.texto;
+
+      const container = document.getElementById('opcionesContainer');
+      container.innerHTML = '';
+      const colores = { A: 'a', B: 'b', C: 'c', D: 'd' };
+
+      Object.entries(data.opciones).forEach(([letra, texto]) => {
+        const btn = document.createElement('button');
+        btn.className = `option-btn option-btn-${colores[letra]}`;
+        btn.id = `opcion-${letra}`;
+        btn.innerHTML = `<span class="option-label">${letra}</span> ${texto}`;
+        btn.addEventListener('click', () => enviarRespuesta(letra));
+        container.appendChild(btn);
+      });
+    });
+
+    socket.on('timer', ({ segundos }) => {
+      segundosRestantes = segundos;
+      document.getElementById('timerDisplay').textContent = segundos;
+      const pct = (segundos / tiempoTotal) * 100;
+      document.getElementById('timerBar').style.width = pct + '%';
+      const colorTimer = document.getElementById('timerDisplay');
+      if (segundos <= 5) {
+        document.getElementById('timerBar').classList.add('urgent');
+        colorTimer.style.color = 'var(--color-red)';
+      } else {
+        document.getElementById('timerBar').classList.remove('urgent');
+        colorTimer.style.color = 'var(--color-green)';
+      }
+    });
+
+    socket.on('answer_result', ({ esCorrecta, puntosGanados, puntajeTotal }) => {
+      miPuntaje = puntajeTotal;
+      document.getElementById('miPuntaje').textContent = puntajeTotal.toLocaleString();
+      if (miRespuesta && !esCorrecta) {
+        document.getElementById(`opcion-${miRespuesta}`).classList.add('selected');
+      }
+    });
+
+    socket.on('question_result', ({ respuestaCorrecta, leaderboard }) => {
+      document.querySelectorAll('.option-btn').forEach(btn => btn.disabled = true);
+      const btnCorrecto = document.getElementById(`opcion-${respuestaCorrecta}`);
+      if (btnCorrecto) btnCorrecto.classList.add('correct');
+      if (miRespuesta && miRespuesta !== respuestaCorrecta) {
+        const btnMio = document.getElementById(`opcion-${miRespuesta}`);
+        if (btnMio) btnMio.classList.add('incorrect');
+      }
+      setTimeout(() => mostrarResultado(respuestaCorrecta, leaderboard), 1500);
+    });
+
+    socket.on('game_finished', ({ leaderboard }) => {
+      sessionStorage.setItem('leaderboard', JSON.stringify(leaderboard));
+      sessionStorage.setItem('miPuntaje', miPuntaje);
+      window.location.href = '/player/results';
+    });
+
+    socket.on('admin_disconnected', () => {
+      alert('El administrador se desconectó.');
+      sessionStorage.clear();
+      window.location.href = '/';
+    });
+
+    function enviarRespuesta(letra) {
+      if (yaRespondio || segundosRestantes <= 0) return;
+      yaRespondio = true;
+      miRespuesta = letra;
+      document.querySelectorAll('.option-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+      });
+      const btnSel = document.getElementById(`opcion-${letra}`);
+      if (btnSel) {
+        btnSel.style.opacity = '1';
+        btnSel.classList.add('selected');
+      }
+      socket.emit('submit_answer', { roomCode, respuesta: letra });
+    }
+
+    function mostrarResultado(respuestaCorrecta, leaderboard) {
+      document.getElementById('pantallaPregunta').classList.add('hidden');
+      document.getElementById('pantallaResultado').classList.remove('hidden');
+
+      const fuiCorrecto = miRespuesta === respuestaCorrecta;
+      const noRespondio = !miRespuesta;
+
+      document.getElementById('resultTitulo').textContent = noRespondio ? 'Tiempo agotado' : fuiCorrecto ? '¡Correcto!' : 'Incorrecto';
+      document.getElementById('resultSubtitulo').textContent = `Puntaje: ${miPuntaje.toLocaleString()}`;
+      document.getElementById('respuestaCorrectaDisplay').textContent = respuestaCorrecta;
+
+      const rankEl = document.getElementById('miniRanking');
+      rankEl.innerHTML = '';
+      leaderboard.slice(0, 5).forEach((p, i) => {
+        const li = document.createElement('li');
+        li.className = 'ranking-item';
+        li.innerHTML = `
+          <span class="ranking-pos">${i + 1}</span>
+          <span class="ranking-name">${p.nickname}</span>
+          <span class="ranking-score">${p.puntaje.toLocaleString()}</span>
+        `;
+        rankEl.appendChild(li);
+      });
+    }
+  </script>
+</body>
+</html>

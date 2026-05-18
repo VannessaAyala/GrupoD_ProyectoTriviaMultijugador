@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 700px) {
+      .admin-grid { grid-template-columns: 1fr; }
+    }
+    .stat-card {
+      background: var(--color-card);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      border: 1px solid rgba(167,139,250,0.15);
+      text-align: center;
+    }
+    .stat-num {
+      font-family: 'Fredoka One', cursive;
+      font-size: 2.5rem;
+      color: var(--color-accent-light);
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .section-title {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .player-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--color-surface);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+      border: 1px solid rgba(167,139,250,0.1);
+    }
+    .btn-control {
+      padding: 14px 20px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform 0.15s, opacity 0.15s;
+      width: 100%;
+      margin-bottom: 10px;
+      letter-spacing: 0.3px;
+    }
+    .btn-control:hover:not(:disabled) { transform: translateY(-2px); }
+    .btn-control:disabled { opacity: 0.4; cursor: not-allowed; }
+    .phase-setup { display: block; }
+    .phase-game { display: none; }
+    body.estado-setup .phase-setup { display: block; }
+    body.estado-setup .phase-game { display: none; }
+    body.estado-game .phase-setup { display: none; }
+    body.estado-game .phase-game { display: block; }
+    .quiz-option {
+      display: block;
+      padding: 14px;
+      background: var(--color-surface);
+      border: 2px solid rgba(167,139,250,0.1);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .quiz-option.selected { border-color: var(--color-accent); background: rgba(245,158,11,0.1); }
+    .quiz-name { font-weight: 700; }
+    .quiz-meta { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 4px; }
+    .log-entry {
+      font-size: 0.82rem;
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.2);
+      margin-bottom: 4px;
+      color: var(--color-text-muted);
+      border-left: 3px solid var(--color-primary);
+    }
+    #eventLog {
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column-reverse;
+    }
+  </style>
+</head>
+<body class="estado-setup">
+  <div class="container-wide">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-top: 20px;">
+      <div>
+        <h1 style="font-size: 1.8rem;">Panel Admin</h1>
+        <p class="text-muted" style="font-size: 0.85rem;">Bienvenido, <span id="adminUsername">...</span></p>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <div class="badge" id="estadoBadge">Sin sala</div>
+        <a href="/admin/quizzes" class="btn btn-primary" style="font-size: 0.85rem; padding: 8px 16px; width: auto;">Quizzes</a>
+        <a href="/admin/logout" class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 16px; width: auto;">Salir</a>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 320px; gap: 20px;">
+      <div>
+        <div class="phase-setup">
+          <div class="card" style="margin-bottom: 16px;">
+            <h3 style="margin-bottom: 16px;">1. Selecciona un Quiz</h3>
+            <div id="quizzesList">
+              <p class="text-muted">Cargando...</p>
+            </div>
+          </div>
+          <div class="card" style="margin-bottom: 16px;">
+            <h3 style="margin-bottom: 16px;">2. Crear sala</h3>
+            <button class="btn-control btn-accent" id="btnCrearSala" disabled>Crear sala</button>
+          </div>
+          <div class="card hidden" id="salaCreada">
+            <h3 style="margin-bottom: 12px;">Sala creada</h3>
+            <div style="text-align: center; padding: 20px; background: var(--color-surface); border-radius: var(--radius-sm); margin-bottom: 16px;">
+              <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 8px;">Código de sala</p>
+              <h2 style="font-size: 3rem; letter-spacing: 8px; color: var(--color-accent-light);" id="codigoSala">------</h2>
+            </div>
+            <button class="btn-control btn-green" id="btnIniciarPartida">Iniciar partida</button>
+          </div>
+        </div>
+
+        <div class="phase-game">
+          <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <h3>Pregunta actual</h3>
+              <span class="badge badge-purple" id="preguntaProgreso">- / -</span>
+            </div>
+            <div id="preguntaAdminPanel" style="background: var(--color-surface); padding: 16px; border-radius: var(--radius-sm); margin-bottom: 16px; min-height: 60px;">
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn-control btn-accent" id="btnSiguiente">Siguiente pregunta</button>
+              <button class="btn-control btn-red" id="btnTerminar">Terminar</button>
+            </div>
+          </div>
+          <div class="admin-grid">
+            <div class="stat-card">
+              <div class="stat-num" id="statRespondidos">0</div>
+              <div class="stat-label">Respondieron</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="statTotal">0</div>
+              <div class="stat-label">Total jugadores</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="section-title">Log de eventos</p>
+          <div id="eventLog"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom: 16px;">
+          <p class="section-title">Jugadores (<span id="contadorJugadores">0</span>)</p>
+          <div id="jugadoresList" style="max-height: 250px; overflow-y: auto;">
+          </div>
+        </div>
+        <div class="card">
+          <p class="section-title">Ranking en vivo</p>
+          <ul class="ranking-list" id="rankingAdmin"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let adminId = null;
+    let selectedQuizId = null;
+    let currentRoomCode = null;
+    let partidaIniciada = false;
+    let totalJugadores = 0;
+
+    const socket = io();
+
+    async function init() {
+      try {
+        const res = await fetch('/admin/api/me');
+        const data = await res.json();
+        if (!data.success) {
+          window.location.href = '/admin/login';
+          return;
+        }
+        adminId = data.admin_id;
+        document.getElementById('adminUsername').textContent = data.username;
+        cargarQuizzes();
+      } catch (err) {
+        window.location.href = '/admin/login';
+      }
+    }
+
+    async function cargarQuizzes() {
+      try {
+        const res = await fetch('/admin/api/quizzes');
+        const data = await res.json();
+        const lista = document.getElementById('quizzesList');
+        lista.innerHTML = '';
+        data.quizzes.forEach(q => {
+          const div = document.createElement('div');
+          div.className = 'quiz-option';
+          div.innerHTML = `<div class="quiz-name">${q.nombre}</div><div class="quiz-meta">${q.total_preguntas} preguntas</div>`;
+          div.addEventListener('click', () => {
+            document.querySelectorAll('.quiz-option').forEach(el => el.classList.remove('selected'));
+            div.classList.add('selected');
+            selectedQuizId = q.id;
+            document.getElementById('btnCrearSala').disabled = false;
+          });
+          lista.appendChild(div);
+        });
+      } catch (err) {}
+    }
+
+    document.getElementById('btnCrearSala').addEventListener('click', () => {
+      if (selectedQuizId && adminId) socket.emit('create_room', { quiz_id: selectedQuizId, admin_id: adminId });
+    });
+
+    socket.on('room_created', ({ codigo }) => {
+      currentRoomCode = codigo;
+      document.getElementById('codigoSala').textContent = codigo;
+      document.getElementById('salaCreada').classList.remove('hidden');
+      document.getElementById('estadoBadge').textContent = `Sala: ${codigo}`;
+      addLog(`Sala ${codigo} creada`);
+    });
+
+    document.getElementById('btnIniciarPartida').addEventListener('click', () => {
+      if (currentRoomCode) socket.emit('start_game', { roomCode: currentRoomCode });
+    });
+
+    socket.on('start_game', () => {
+      document.body.className = 'estado-game';
+      addLog('Partida iniciada');
+    });
+
+    document.getElementById('btnSiguiente').addEventListener('click', () => {
+      if (currentRoomCode) socket.emit('next_question', { roomCode: currentRoomCode });
+    });
+
+    socket.on('question', (data) => {
+      document.getElementById('preguntaProgreso').textContent = `${data.numero} / ${data.total}`;
+      document.getElementById('preguntaAdminPanel').textContent = data.texto;
+      addLog(`Pregunta ${data.numero} enviada`);
+    });
+
+    socket.on('answers_update', ({ respondidos, total }) => {
+      document.getElementById('statRespondidos').textContent = respondidos;
+      document.getElementById('statTotal').textContent = total;
+    });
+
+    socket.on('question_result', ({ leaderboard }) => {
+      actualizarRanking(leaderboard);
+    });
+
+    document.getElementById('btnTerminar').addEventListener('click', () => {
+      if (currentRoomCode && confirm('¿Terminar partida?')) socket.emit('game_finished', { roomCode: currentRoomCode });
+    });
+
+    socket.on('game_finished', ({ leaderboard }) => {
+      actualizarRanking(leaderboard);
+      addLog('Partida terminada');
+      alert('Partida terminada');
+    });
+
+    socket.on('player_joined', ({ nickname, players }) => {
+      actualizarJugadores(players);
+      addLog(`${nickname} se unió`);
+    });
+
+    socket.on('player_left', ({ nickname, players }) => {
+      actualizarJugadores(players);
+      addLog(`${nickname} se fue`);
+    });
+
+    function actualizarJugadores(players) {
+      const lista = document.getElementById('jugadoresList');
+      const conectados = players.filter(p => p.conectado);
+      document.getElementById('contadorJugadores').textContent = conectados.length;
+      lista.innerHTML = '';
+      conectados.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'player-item';
+        div.innerHTML = `<span>${p.nickname}</span><span>${p.puntaje}</span>`;
+        lista.appendChild(div);
+      });
+    }
+
+    function actualizarRanking(leaderboard) {
+      const rankEl = document.getElementById('rankingAdmin');
+      rankEl.innerHTML = '';
+      leaderboard.slice(0, 10).forEach((p, i) => {
+        const li = document.createElement('li');
+        li.className = 'ranking-item';
+        li.innerHTML = `<span class="ranking-pos">${i + 1}</span><span class="ranking-name">${p.nickname}</span><span class="ranking-score">${p.puntaje}</span>`;
+        rankEl.appendChild(li);
+      });
+    }
+
+    function addLog(msg) {
+      const log = document.getElementById('eventLog');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.prepend(entry);
+    }
+
+    init();
+  </script>
+</body>
+</html>
