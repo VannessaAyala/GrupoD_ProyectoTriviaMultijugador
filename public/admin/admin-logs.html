@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Actividad del sistema (Logs)</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .logs-stats {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 800px) {
+      .logs-stats { grid-template-columns: repeat(3, 1fr); }
+    }
+    .stat-mini {
+      background: var(--color-card);
+      border-radius: var(--radius-sm);
+      padding: 12px 8px;
+      text-align: center;
+      border: 1px solid rgba(167,139,250,0.15);
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .stat-mini:hover { transform: translateY(-2px); }
+    .stat-mini.active { border-color: var(--color-accent-light); }
+    .stat-mini .num { font-family: 'Fredoka One', cursive; font-size: 1.5rem; }
+    .stat-mini .lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--color-text-muted); }
+
+    /* ---- Panel de filtros ---- */
+    .filters-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    @media (max-width: 700px) { .filters-grid { grid-template-columns: 1fr; } }
+
+    .filters-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+    .filters-row select,
+    .filters-row input[type="text"] {
+      padding: 10px 14px;
+      background: var(--color-surface);
+      border: 2px solid rgba(167,139,250,0.2);
+      border-radius: var(--radius-sm);
+      color: var(--color-text);
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.85rem;
+      outline: none;
+      flex: 1;
+      min-width: 140px;
+    }
+    .filters-row input[type="text"] { min-width: 180px; }
+
+    /* Filtro de usuario activo — destacado visualmente */
+    .usuario-filter-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+    .usuario-filter-wrap input {
+      width: 100%;
+      padding: 10px 36px 10px 14px;
+      background: var(--color-surface);
+      border: 2px solid rgba(167,139,250,0.35);
+      border-radius: var(--radius-sm);
+      color: var(--color-text);
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.85rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .usuario-filter-wrap input:focus {
+      border-color: var(--color-accent-light);
+    }
+    .usuario-filter-wrap .clear-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0;
+      display: none;
+    }
+    .usuario-filter-wrap input:not(:placeholder-shown) + .clear-btn { display: block; }
+
+    .usuario-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: rgba(124,58,237,0.25);
+      color: #c4b5fd;
+      border: 1px solid rgba(124,58,237,0.4);
+    }
+    .usuario-tag.jugador { background: rgba(16,185,129,0.15); color: #6ee7b7; border-color: rgba(16,185,129,0.3); }
+    .usuario-tag.admin   { background: rgba(245,158,11,0.15); color: #fde68a; border-color: rgba(245,158,11,0.3); }
+    .usuario-tag.oauth   { background: rgba(59,130,246,0.15); color: #93c5fd; border-color: rgba(59,130,246,0.3); }
+
+    .usuarios-sugerencias {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: var(--color-card);
+      border: 1px solid rgba(167,139,250,0.3);
+      border-radius: var(--radius-sm);
+      z-index: 100;
+      max-height: 220px;
+      overflow-y: auto;
+      display: none;
+    }
+    .usuarios-sugerencias.visible { display: block; }
+    .sugerencia-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      border-bottom: 1px solid rgba(167,139,250,0.08);
+    }
+    .sugerencia-item:hover { background: rgba(124,58,237,0.15); }
+    .sugerencia-item:last-child { border-bottom: none; }
+
+    .filtro-usuario-activo {
+      display: none;
+      padding: 8px 14px;
+      background: rgba(124,58,237,0.1);
+      border: 1px solid rgba(124,58,237,0.3);
+      border-radius: var(--radius-sm);
+      font-size: 0.82rem;
+      color: var(--color-text-muted);
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .filtro-usuario-activo.visible {
+      display: flex;
+    }
+    .filtro-usuario-activo strong { color: var(--color-text); }
+    .filtro-usuario-activo button {
+      background: none;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      margin-left: auto;
+      padding: 0;
+    }
+
+    .btn-mini {
+      padding: 10px 18px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 800;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+      color: white;
+      white-space: nowrap;
+    }
+    .btn-mini:hover { transform: translateY(-1px); }
+    .btn-mini.secundario {
+      background: var(--color-surface);
+      border: 2px solid rgba(167,139,250,0.2);
+      color: var(--color-text);
+    }
+
+    /* ---- Filas de log ---- */
+    .log-row {
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--color-surface);
+      margin-bottom: 6px;
+      border-left: 4px solid var(--color-primary);
+      font-size: 0.85rem;
+    }
+    .log-row.lvl-trace { border-left-color: #6b7280; }
+    .log-row.lvl-debug { border-left-color: var(--color-blue); }
+    .log-row.lvl-info  { border-left-color: var(--color-green); }
+    .log-row.lvl-warn  { border-left-color: var(--color-accent); }
+    .log-row.lvl-error { border-left-color: var(--color-red); }
+    .log-row.lvl-fatal { border-left-color: #7f1d1d; background: rgba(127,29,29,0.25); }
+
+    .log-row-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      cursor: pointer;
+    }
+    .log-time { color: var(--color-text-muted); font-size: 0.75rem; font-family: monospace; white-space: nowrap; }
+    .lvl-tag {
+      font-size: 0.65rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .lvl-tag.lvl-trace { background: rgba(107,114,128,0.25); color: #d1d5db; }
+    .lvl-tag.lvl-debug { background: rgba(59,130,246,0.2); color: #93c5fd; }
+    .lvl-tag.lvl-info  { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+    .lvl-tag.lvl-warn  { background: rgba(245,158,11,0.2); color: #fde68a; }
+    .lvl-tag.lvl-error { background: rgba(239,68,68,0.2); color: #fca5a5; }
+    .lvl-tag.lvl-fatal { background: #7f1d1d; color: #fecaca; }
+
+    .mod-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(124,58,237,0.25);
+      color: #c4b5fd;
+      white-space: nowrap;
+    }
+    .actor-tag {
+      font-size: 0.7rem;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+    }
+    .nick-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(16,185,129,0.15);
+      color: #6ee7b7;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .nick-tag:hover { background: rgba(16,185,129,0.3); }
+    .sala-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.15);
+      color: #93c5fd;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .sala-tag:hover { background: rgba(59,130,246,0.3); }
+
+    .log-msg { flex: 1; min-width: 200px; font-weight: 600; }
+    .log-meta-summary { font-size: 0.75rem; color: var(--color-text-muted); margin-top: 4px; }
+    .log-meta-json {
+      display: none;
+      margin-top: 8px;
+      background: rgba(0,0,0,0.25);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #d1d5db;
+    }
+    .log-row.expanded .log-meta-json { display: block; }
+
+    .section-title-label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    #loadMoreWrap { text-align: center; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container-wide">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-top: 20px; flex-wrap: wrap; gap: 10px;">
+      <div>
+        <h1 style="font-size: 1.8rem;">Actividad del sistema</h1>
+        <p class="text-muted" style="font-size: 0.85rem;">Registros de admins, jugadores y visitantes &middot; <span id="adminUsername">...</span></p>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <a href="/admin/dashboard" class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 16px; width: auto;">Dashboard</a>
+        <a href="/admin/quizzes"   class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 16px; width: auto;">Quizzes</a>
+        <a href="/admin/logout"    class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 16px; width: auto;">Salir</a>
+      </div>
+    </div>
+
+    <div class="logs-stats" id="statsRow">
+      <div class="stat-mini" data-level="trace"><div class="num" id="cntTrace">0</div><div class="lbl">Traza</div></div>
+      <div class="stat-mini" data-level="debug"><div class="num" id="cntDebug">0</div><div class="lbl">Depuración</div></div>
+      <div class="stat-mini" data-level="info" ><div class="num" id="cntInfo" >0</div><div class="lbl">Info</div></div>
+      <div class="stat-mini" data-level="warn" ><div class="num" id="cntWarn" >0</div><div class="lbl">Advertencia</div></div>
+      <div class="stat-mini" data-level="error"><div class="num" id="cntError">0</div><div class="lbl">Error</div></div>
+      <div class="stat-mini" data-level="fatal"><div class="num" id="cntFatal">0</div><div class="lbl">Fatal</div></div>
+    </div>
+
+    <div class="card" style="padding: 18px; margin-bottom: 16px;">
+
+      <div class="filters-row">
+        <select id="filtroFecha" style="max-width: 160px;"></select>
+        <select id="filtroModulo">
+          <option value="">Todos los módulos</option>
+        </select>
+        <select id="filtroSala">
+          <option value="">Todas las salas</option>
+        </select>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--color-text-muted); cursor: pointer; user-select: none;">
+          <input type="checkbox" id="autoRefresh"> Auto-actualizar (8s)
+        </label>
+      </div>
+
+      <div class="filters-row">
+        <div class="usuario-filter-wrap" style="max-width: 280px;">
+          <input type="text" id="filtroUsuario" placeholder="🔍 Filtrar por usuario / jugador...">
+          <button class="clear-btn" id="clearUsuario" title="Quitar filtro de usuario">✕</button>
+          <div class="usuarios-sugerencias" id="usuariosSugerencias"></div>
+        </div>
+        <input type="text" id="filtroTexto" placeholder="Buscar texto libre (IP, trace_id, mensaje...)">
+        <button class="btn-mini" id="btnAplicar">Aplicar filtros</button>
+        <button class="btn-mini secundario" id="btnLimpiar">Limpiar todo</button>
+      </div>
+
+      <div class="filtro-usuario-activo" id="usuarioActivoBanner">
+        <span>Mostrando actividad de:</span>
+        <strong id="usuarioActivoNombre"></strong>
+        <span id="usuarioActivoTipo" class="usuario-tag"></span>
+        <button id="btnQuitarUsuario" title="Quitar filtro">✕</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 18px;">
+      <p class="section-title-label">
+        Mostrando <span id="totalCount">0</span> eventos &middot;
+        <span id="filtroActivo">sin filtro de nivel</span>
+      </p>
+      <div id="logsList">
+        <p class="text-muted">Cargando...</p>
+      </div>
+      <div id="loadMoreWrap">
+        <button class="btn-mini" id="btnCargarMas" style="display: none;">Cargar más</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const LIMIT = 100;
+    let offset = 0;
+    let nivelActivo = null;
+    let autoRefreshTimer = null;
+    let usuarioActivoId = null;     
+    let usuarioActivoInfo = null;   
+    let todosUsuarios = [];        
+    let todasSalas = [];           
+
+  
+    async function init() {
+      try {
+        const res = await fetch('/admin/api/me');
+        const data = await res.json();
+        if (!data.success) { window.location.href = '/admin/login'; return; }
+        document.getElementById('adminUsername').textContent = data.username;
+      } catch (e) {
+        window.location.href = '/admin/login';
+        return;
+      }
+
+      await cargarMeta();
+      await cargarLogs(true);
+
+      document.getElementById('btnAplicar').addEventListener('click', () => cargarLogs(true));
+      document.getElementById('btnCargarMas').addEventListener('click', () => cargarLogs(false));
+      document.getElementById('btnLimpiar').addEventListener('click', limpiarFiltros);
+      document.getElementById('btnQuitarUsuario').addEventListener('click', quitarFiltroUsuario);
+      document.getElementById('clearUsuario').addEventListener('click', quitarFiltroUsuario);
+      document.getElementById('filtroFecha').addEventListener('change', () => { cargarMeta(); cargarLogs(true); });
+      document.getElementById('autoRefresh').addEventListener('change', toggleAutoRefresh);
+
+      document.querySelectorAll('.stat-mini').forEach(el => {
+        el.addEventListener('click', () => {
+          const lvl = el.dataset.level;
+          nivelActivo = (nivelActivo === lvl) ? null : lvl;
+          marcarNivelActivo();
+          cargarLogs(true);
+        });
+      });
+
+      const inputUsuario = document.getElementById('filtroUsuario');
+      const sugerencias  = document.getElementById('usuariosSugerencias');
+
+      inputUsuario.addEventListener('input', () => {
+        const q = inputUsuario.value.toLowerCase().trim();
+        if (!q) { sugerencias.classList.remove('visible'); return; }
+        const filtrados = todosUsuarios.filter(u =>
+          u.nombre.toLowerCase().includes(q) ||
+          (u.email && u.email.toLowerCase().includes(q)) ||
+          (u.sala  && u.sala.toLowerCase().includes(q))
+        ).slice(0, 12);
+        renderSugerencias(filtrados);
+      });
+
+      inputUsuario.addEventListener('focus', () => {
+        if (inputUsuario.value && todosUsuarios.length) {
+          const q = inputUsuario.value.toLowerCase();
+          renderSugerencias(todosUsuarios.filter(u => u.nombre.toLowerCase().includes(q)).slice(0, 12));
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!document.querySelector('.usuario-filter-wrap').contains(e.target)) {
+          sugerencias.classList.remove('visible');
+        }
+      });
+    }
+
+  
+    async function cargarMeta() {
+      const fecha = document.getElementById('filtroFecha').value || '';
+      const res = await fetch('/admin/api/logs/meta' + (fecha ? `?fecha=${fecha}` : ''));
+      const data = await res.json();
+      if (!data.success) return;
+
+      const selFecha = document.getElementById('filtroFecha');
+      if (!selFecha.dataset.cargado) {
+        data.fechas.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f; opt.textContent = f;
+          selFecha.appendChild(opt);
+        });
+        selFecha.dataset.cargado = '1';
+      }
+
+      const selModulo = document.getElementById('filtroModulo');
+      const valMod = selModulo.value;
+      selModulo.innerHTML = '<option value="">Todos los módulos</option>';
+      (data.modulos || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        selModulo.appendChild(opt);
+      });
+      selModulo.value = valMod;
+
+      todasSalas = data.salas || [];
+      const selSala = document.getElementById('filtroSala');
+      const valSala = selSala.value;
+      selSala.innerHTML = '<option value="">Todas las salas</option>';
+      todasSalas.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.codigo; opt.textContent = `Sala ${s.codigo}`;
+        selSala.appendChild(opt);
+      });
+      selSala.value = valSala;
+
+      todosUsuarios = data.usuarios || [];
+
+      document.getElementById('cntTrace').textContent = data.resumen.trace;
+      document.getElementById('cntDebug').textContent = data.resumen.debug;
+      document.getElementById('cntInfo').textContent  = data.resumen.info;
+      document.getElementById('cntWarn').textContent  = data.resumen.warn;
+      document.getElementById('cntError').textContent = data.resumen.error;
+      document.getElementById('cntFatal').textContent = data.resumen.fatal;
+    }
+
+    async function cargarLogs(reiniciar) {
+      if (reiniciar) {
+        offset = 0;
+        document.getElementById('logsList').innerHTML = '<p class="text-muted">Cargando...</p>';
+        await cargarMeta();
+      }
+
+      const params = new URLSearchParams();
+      const fecha  = document.getElementById('filtroFecha').value;
+      const modulo = document.getElementById('filtroModulo').value;
+      const sala   = document.getElementById('filtroSala').value;
+      const texto  = document.getElementById('filtroTexto').value.trim();
+
+      if (fecha)  params.set('fecha', fecha);
+      if (modulo) params.set('module', modulo);
+      if (sala)   params.set('sala', sala);
+      if (texto)  params.set('q', texto);
+      if (nivelActivo)   params.set('level', nivelActivo);
+      if (usuarioActivoId) params.set('usuario', usuarioActivoId);
+      params.set('limit',  LIMIT);
+      params.set('offset', offset);
+
+      const res  = await fetch('/admin/api/logs?' + params.toString());
+      const data = await res.json();
+      if (!data.success) return;
+
+      const lista = document.getElementById('logsList');
+      if (reiniciar) lista.innerHTML = '';
+      if (offset === 0 && data.entradas.length === 0) {
+        lista.innerHTML = '<p class="text-muted">No hay eventos para estos filtros.</p>';
+      }
+
+      data.entradas.forEach(entry => lista.appendChild(renderEntry(entry)));
+
+      document.getElementById('totalCount').textContent = data.total;
+      offset += data.entradas.length;
+      document.getElementById('btnCargarMas').style.display = (offset < data.total) ? 'inline-block' : 'none';
+
+      marcarNivelActivo();
+    }
+
+    function renderEntry(entry) {
+      const row = document.createElement('div');
+      row.className = `log-row lvl-${entry.level}`;
+
+      const hora = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString('es-EC') : '';
+
+      const top = document.createElement('div');
+      top.className = 'log-row-top';
+
+      let actorHtml = '';
+      if (entry.actor_type && entry.actor_type !== 'anonimo') {
+        actorHtml += `<span class="actor-tag">${escapeHtml(entry.actor_type)}${entry.actor_name ? ': ' + escapeHtml(entry.actor_name) : ''}</span>`;
+      }
+      if (entry.nickname) {
+        actorHtml += `<span class="nick-tag" data-nick="${escapeAttr(entry.nickname)}" title="Filtrar por este jugador">👤 ${escapeHtml(entry.nickname)}</span>`;
+      }
+      if (entry.codigo) {
+        actorHtml += `<span class="sala-tag" data-sala="${escapeAttr(entry.codigo)}" title="Filtrar por esta sala">🎮 ${escapeHtml(entry.codigo)}</span>`;
+      }
+
+      top.innerHTML = `
+        <span class="log-time">${hora}</span>
+        <span class="lvl-tag lvl-${entry.level}">${traducirNivel(entry.level)}</span>
+        ${entry.module ? `<span class="mod-tag">${escapeHtml(entry.module)}</span>` : ''}
+        <span class="log-msg"></span>
+        ${actorHtml}
+      `;
+      top.querySelector('.log-msg').textContent = entry.message || '';
+
+      top.querySelectorAll('.nick-tag').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          aplicarFiltroUsuario(el.dataset.nick, el.dataset.nick, 'jugador');
+        });
+      });
+      top.querySelectorAll('.sala-tag').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          document.getElementById('filtroSala').value = el.dataset.sala;
+          cargarLogs(true);
+        });
+      });
+
+      top.addEventListener('click', () => row.classList.toggle('expanded'));
+      row.appendChild(top);
+
+      const resumenMeta = resumirMeta(entry);
+      if (resumenMeta) {
+        const metaP = document.createElement('div');
+        metaP.className = 'log-meta-summary';
+        metaP.textContent = resumenMeta;
+        row.appendChild(metaP);
+      }
+
+      const pre = document.createElement('div');
+      pre.className = 'log-meta-json';
+      pre.textContent = JSON.stringify(entry, null, 2);
+      row.appendChild(pre);
+
+      return row;
+    }
+
+    function renderSugerencias(lista) {
+      const contenedor = document.getElementById('usuariosSugerencias');
+      contenedor.innerHTML = '';
+      if (!lista.length) { contenedor.classList.remove('visible'); return; }
+
+      const iconos = { jugador: '👤', admin: '🛡️', oauth: '🌐' };
+      lista.forEach(u => {
+        const item = document.createElement('div');
+        item.className = 'sugerencia-item';
+        item.innerHTML = `
+          <span>${iconos[u.tipo] || '👤'}</span>
+          <span>${escapeHtml(u.nombre)}</span>
+          <span class="usuario-tag ${u.tipo}" style="font-size:0.65rem;">${u.tipo}</span>
+          ${u.sala ? `<span style="font-size:0.65rem;color:var(--color-text-muted);">sala ${escapeHtml(u.sala)}</span>` : ''}
+        `;
+        item.addEventListener('click', () => {
+          const idFiltro = u.email || u.nombre;
+          aplicarFiltroUsuario(idFiltro, u.nombre, u.tipo);
+          document.getElementById('usuariosSugerencias').classList.remove('visible');
+        });
+        contenedor.appendChild(item);
+      });
+      contenedor.classList.add('visible');
+    }
+
+    function aplicarFiltroUsuario(idFiltro, nombre, tipo) {
+      usuarioActivoId   = idFiltro;
+      usuarioActivoInfo = { nombre, tipo };
+      document.getElementById('filtroUsuario').value = nombre;
+
+      document.getElementById('usuarioActivoNombre').textContent = nombre;
+      const tipoTag = document.getElementById('usuarioActivoTipo');
+      tipoTag.textContent = tipo;
+      tipoTag.className = `usuario-tag ${tipo}`;
+      document.getElementById('usuarioActivoBanner').classList.add('visible');
+
+      cargarLogs(true);
+    }
+
+    function quitarFiltroUsuario() {
+      usuarioActivoId   = null;
+      usuarioActivoInfo = null;
+      document.getElementById('filtroUsuario').value = '';
+      document.getElementById('usuarioActivoBanner').classList.remove('visible');
+      document.getElementById('usuariosSugerencias').classList.remove('visible');
+      cargarLogs(true);
+    }
+
+
+    function marcarNivelActivo() {
+      document.querySelectorAll('.stat-mini').forEach(el => {
+        el.classList.toggle('active', el.dataset.level === nivelActivo);
+      });
+      document.getElementById('filtroActivo').textContent = nivelActivo
+        ? `nivel: ${traducirNivel(nivelActivo)}`
+        : 'sin filtro de nivel';
+    }
+
+    function limpiarFiltros() {
+      nivelActivo = null;
+      usuarioActivoId = null;
+      usuarioActivoInfo = null;
+      document.getElementById('filtroModulo').value = '';
+      document.getElementById('filtroSala').value   = '';
+      document.getElementById('filtroTexto').value  = '';
+      document.getElementById('filtroUsuario').value = '';
+      document.getElementById('usuarioActivoBanner').classList.remove('visible');
+      marcarNivelActivo();
+      cargarLogs(true);
+    }
+
+    function toggleAutoRefresh(e) {
+      if (e.target.checked) {
+        autoRefreshTimer = setInterval(() => cargarLogs(true), 8000);
+      } else {
+        clearInterval(autoRefreshTimer);
+      }
+    }
+
+    function resumirMeta(entry) {
+      const excluir = new Set(['level', 'message', 'timestamp', 'module', 'stack', 'body', 'actor_type', 'actor_id', 'actor_name', 'nickname', 'codigo']);
+      const partes = [];
+      for (const key of Object.keys(entry)) {
+        if (excluir.has(key)) continue;
+        let val = entry[key];
+        if (val === null || val === undefined || val === '') continue;
+        if (typeof val === 'object') val = JSON.stringify(val);
+        if (String(val).length > 80) val = String(val).slice(0, 80) + '…';
+        partes.push(`${key}: ${val}`);
+      }
+      return partes.join('  ·  ');
+    }
+
+    const NIVELES_ES = { trace: 'TRAZA', debug: 'DEPURACIÓN', info: 'INFO', warn: 'ADVERTENCIA', error: 'ERROR', fatal: 'FATAL' };
+    function traducirNivel(lvl) { return NIVELES_ES[lvl] || lvl.toUpperCase(); }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+    function escapeAttr(str) { return String(str).replace(/"/g, '&quot;'); }
+
+    init();
+  </script>
+</body>
+</html>
