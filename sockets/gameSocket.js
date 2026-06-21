@@ -82,7 +82,7 @@ function initGameSocket(io) {
         const code = roomCode.toUpperCase().trim();
         const nick = nickname.trim();
 
-        if (!nick || nick.length < 2 || nick.length > 20) {
+        if (!nick || nick.length < 2 || nick.length > 50) {
           socket.emit('join_error', { mensaje: 'Nickname inválido' });
           return;
         }

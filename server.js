@@ -5,12 +5,20 @@ const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-
 const adminRoutes = require('./routes/adminRoutes');
 const { initGameSocket } = require('./sockets/gameSocket');
+const session = require('express-session');
+const passport = require('passport');
+const authRoutes = require('./routes/authRoutes');
+require('./config/passport');
+
 
 const app = express();
 const server = http.createServer(app);
+app.use(session({ secret: process.env.SESSION_SECRET || 'secreto', resave: false, saveUninitialized: true }));
+app.use(passport.initialize());
+app.use(passport.session());
+app.use('/auth', authRoutes);
 
 const io = new Server(server, {
   cors: {
@@ -56,8 +64,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/admin', adminRoutes);
 
+// Nuevas rutas para perfil OAuth
+app.get('/api/user', (req, res) => {
+    if (req.user) {
+        res.json({ nickname: req.user.displayName, email: req.user.emails[0].value });
+    } else {
+        res.status(401).json({ error: 'No autenticado' });
+    }
+});
+
+app.get('/perfil', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'player', 'perfil.html'));
+});
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'player', 'login.html'));
+});
+
+app.get('/lobby', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'player', 'lobby.html'));
 });
 
 app.get('/player/lobby', (req, res) => {
