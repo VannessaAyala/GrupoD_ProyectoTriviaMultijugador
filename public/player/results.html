@@ -68,8 +68,12 @@
     });
 
     function volverAlInicio() {
-      sessionStorage.clear();
-      window.location.href = '/';
+      // Limpiar datos del juego, pero no la sesión de usuario
+      sessionStorage.removeItem('roomCode');
+      sessionStorage.removeItem('nickname');
+      sessionStorage.removeItem('leaderboard');
+      sessionStorage.removeItem('miPuntaje');
+      window.location.href = '/perfil';
     }
   </script>
 </body>
