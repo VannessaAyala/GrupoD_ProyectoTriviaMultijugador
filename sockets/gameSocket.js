@@ -1,4 +1,5 @@
 const { query } = require('../database/database');
+const logger = require('../config/logger').child('gameSocket');
 
 const roomStates = new Map();
 
@@ -17,8 +18,15 @@ function calcularPuntos(tiempoRespuestaMs, tiempoLimiteMs) {
   return Math.round(500 + 500 * factor);
 }
 
+function obtenerIpSocket(socket) {
+  return socket.handshake?.address || socket.request?.connection?.remoteAddress || 'desconocida';
+}
+
 function initGameSocket(io) {
   io.on('connection', (socket) => {
+    const ipSocket = obtenerIpSocket(socket);
+    logger.debug('Nueva conexión socket establecida', { socket_id: socket.id, ip: ipSocket });
+
     socket.on('create_room', async ({ quiz_id, admin_id }) => {
       try {
         let codigo;
@@ -43,6 +51,7 @@ function initGameSocket(io) {
         const preguntas = preguntasResult.rows;
 
         if (preguntas.length === 0) {
+          logger.warn('Intento de crear sala con quiz sin preguntas', { socket_id: socket.id, quiz_id, ip: ipSocket });
           socket.emit('error_sala', { mensaje: 'Este quiz no tiene preguntas' });
           return;
         }
@@ -66,13 +75,11 @@ function initGameSocket(io) {
         socket.roomCode = codigo;
         socket.isAdmin = true;
 
-        socket.emit('room_created', {
-          codigo,
-          sala_id,
-          totalPreguntas: preguntas.length
-        });
+        logger.info('Sala de juego creada', { codigo, sala_id, quiz_id, admin_id, total_preguntas: preguntas.length, ip: ipSocket });
+
+        socket.emit('room_created', { codigo, sala_id, totalPreguntas: preguntas.length });
       } catch (err) {
-        console.error('Error create_room:', err.message);
+        logger.error('Error al crear la sala', { socket_id: socket.id, quiz_id, admin_id, ip: ipSocket, error: err.message, stack: err.stack });
         socket.emit('error_sala', { mensaje: 'Error al crear la sala' });
       }
     });
@@ -89,6 +96,7 @@ function initGameSocket(io) {
 
         const roomState = roomStates.get(code);
         if (!roomState) {
+          logger.warn('Intento de unirse a sala inexistente', { socket_id: socket.id, codigo: code, nickname: nick, ip: ipSocket });
           socket.emit('join_error', { mensaje: 'Sala no encontrada' });
           return;
         }
@@ -117,10 +125,9 @@ function initGameSocket(io) {
           socket.isAdmin = false;
           socket.jugador_id = player.jugador_id;
 
-          await query(
-            'UPDATE jugadores SET socket_id = $1, conectado = true WHERE id = $2',
-            [socket.id, player.jugador_id]
-          );
+          await query('UPDATE jugadores SET socket_id = $1, conectado = true WHERE id = $2', [socket.id, player.jugador_id]);
+
+          logger.info('Jugador reconectado a partida en curso', { codigo: code, nickname: nick, jugador_id: player.jugador_id, ip: ipSocket });
 
           socket.emit('join_success', { nickname: nick, roomCode: code });
           return;
@@ -137,17 +144,14 @@ function initGameSocket(io) {
         );
         const jugador_id = result.rows[0].id;
 
-        roomState.players.set(socket.id, {
-          nickname: nick,
-          jugador_id,
-          puntaje: 0,
-          conectado: true
-        });
+        roomState.players.set(socket.id, { nickname: nick, jugador_id, puntaje: 0, conectado: true });
 
         socket.join(code);
         socket.roomCode = code;
         socket.isAdmin = false;
         socket.jugador_id = jugador_id;
+
+        logger.info('Jugador se unió a la sala', { codigo: code, nickname: nick, jugador_id, sala_id: roomState.sala_id, total_jugadores: roomState.players.size, ip: ipSocket });
 
         socket.emit('join_success', { nickname: nick, roomCode: code });
 
@@ -155,7 +159,7 @@ function initGameSocket(io) {
         io.to(code).emit('player_joined', { nickname: nick, players: playersArray });
         io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
       } catch (err) {
-        console.error('Error join_room:', err.message);
+        logger.error('Error al unirse a la sala', { socket_id: socket.id, roomCode, ip: ipSocket, error: err.message, stack: err.stack });
         socket.emit('join_error', { mensaje: 'Error al unirse' });
       }
     });
@@ -174,9 +178,17 @@ function initGameSocket(io) {
         await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', roomState.sala_id]);
         roomState.estado = 'jugando';
 
+        logger.info('Partida iniciada', {
+          codigo: roomCode,
+          sala_id: roomState.sala_id,
+          partida_id: roomState.partida_id,
+          total_jugadores: roomState.players.size,
+          jugadores: [...roomState.players.values()].map(p => p.nickname)
+        });
+
         io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
       } catch (err) {
-        console.error('Error start_game:', err.message);
+        logger.error('Error al iniciar la partida', { roomCode, error: err.message, stack: err.stack });
       }
     });
 
@@ -202,6 +214,15 @@ function initGameSocket(io) {
 
         await query('UPDATE partidas SET pregunta_actual = $1 WHERE id = $2', [idx + 1, roomState.partida_id]);
 
+        logger.debug('Enviando pregunta a los jugadores', {
+          codigo: roomCode,
+          numero: idx + 1,
+          total: roomState.preguntas.length,
+          pregunta_id: pregunta.id,
+          categoria: pregunta.categoria,
+          dificultad: pregunta.dificultad
+        });
+
         const pData = {
           numero: idx + 1,
           total: roomState.preguntas.length,
@@ -225,7 +246,7 @@ function initGameSocket(io) {
           }
         }, 1000);
       } catch (err) {
-        console.error('Error next_question:', err.message);
+        logger.error('Error al avanzar pregunta', { roomCode, error: err.message, stack: err.stack });
       }
     });
 
@@ -252,6 +273,20 @@ function initGameSocket(io) {
         );
         await query('UPDATE jugadores SET puntaje = $1 WHERE id = $2', [player.puntaje, player.jugador_id]);
 
+        logger.trace('Respuesta de jugador registrada', {
+          codigo: roomCode,
+          jugador_id: player.jugador_id,
+          nickname: player.nickname,
+          pregunta_id: pregunta.id,
+          pregunta_num: roomState.currentQuestionIndex + 1,
+          respuesta,
+          correcta: pregunta.correcta,
+          es_correcta: correct,
+          puntos_ganados: pts,
+          tiempo_respuesta_ms: t,
+          ip: ipSocket
+        });
+
         socket.emit('answer_result', { esCorrecta: correct, puntosGanados: pts, puntajeTotal: player.puntaje });
 
         const conectados = [...roomState.players.values()].filter(p => p.conectado).length;
@@ -264,7 +299,7 @@ function initGameSocket(io) {
           await revelarRespuesta(io, roomCode, roomState, pregunta);
         }
       } catch (err) {
-        console.error('Error submit_answer:', err.message);
+        logger.error('Error al procesar respuesta', { roomCode, socket_id: socket.id, error: err.message, stack: err.stack });
       }
     });
 
@@ -273,7 +308,7 @@ function initGameSocket(io) {
         const roomState = roomStates.get(roomCode);
         if (roomState && socket.id === roomState.adminSocketId) await terminarPartida(io, roomCode, roomState);
       } catch (err) {
-        console.error('Error game_finished:', err.message);
+        logger.error('Error al finalizar la partida', { roomCode, error: err.message, stack: err.stack });
       }
     });
 
@@ -284,17 +319,22 @@ function initGameSocket(io) {
 
     socket.on('disconnect', async () => {
       const roomCode = socket.roomCode;
-      if (!roomCode) return;
+      if (!roomCode) {
+        logger.debug('Socket desconectado sin sala asociada', { socket_id: socket.id, ip: ipSocket });
+        return;
+      }
       const roomState = roomStates.get(roomCode);
       if (!roomState) return;
 
       if (socket.isAdmin) {
+        logger.warn('Administrador de sala desconectado', { codigo: roomCode, sala_id: roomState.sala_id, ip: ipSocket });
         io.to(roomCode).emit('admin_disconnected', { mensaje: 'Admin desconectado' });
       } else {
         const player = roomState.players.get(socket.id);
         if (player) {
           player.conectado = false;
           await query('UPDATE jugadores SET conectado = false WHERE id = $1', [player.jugador_id]);
+          logger.info('Jugador desconectado de la sala', { codigo: roomCode, nickname: player.nickname, jugador_id: player.jugador_id, puntaje_al_salir: player.puntaje, ip: ipSocket });
           const playersArray = getPlayersArray(roomState);
           io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
           io.to(roomCode).emit('player_left', { nickname: player.nickname, players: playersArray });
@@ -330,11 +370,21 @@ async function terminarPartida(io, roomCode, roomState) {
     if (roomState.timerInterval) clearInterval(roomState.timerInterval);
     await query('UPDATE salas SET estado = $1 WHERE id = $2', ['terminada', roomState.sala_id]);
     await query('UPDATE partidas SET terminada_en = NOW() WHERE id = $1', [roomState.partida_id]);
+
+    logger.info('Partida finalizada', {
+      codigo: roomCode,
+      sala_id: roomState.sala_id,
+      partida_id: roomState.partida_id,
+      total_jugadores: roomState.players.size,
+      ganador: getLeaderboard(roomState)[0]?.nickname || 'sin jugadores'
+    });
+
     io.to(roomCode).emit('game_finished', { leaderboard: getLeaderboard(roomState) });
     setTimeout(() => roomStates.delete(roomCode), 30000);
   } catch (err) {
-    console.error('Error terminarPartida:', err.message);
+    logger.error('Error al terminar la partida', { roomCode, error: err.message, stack: err.stack });
   }
 }
+
 
 module.exports = { initGameSocket };

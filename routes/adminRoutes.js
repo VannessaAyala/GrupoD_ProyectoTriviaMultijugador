@@ -3,10 +3,13 @@ const bcrypt = require('bcrypt');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { query } = require('../database/database');
+const logger = require('../config/logger').child('adminRoutes');
+const logReader = require('../config/logReader');
+const { listarUsuariosActivos, listarSalasActivas } = logReader;
 
 const router = express.Router();
 
-// Middleware local para proteger vistas HTML del Administrador con JWT
+
 function requireAdmin(req, res, next) {
   const token = req.cookies?.admin_token;
   if (!token) {
@@ -18,13 +21,14 @@ function requireAdmin(req, res, next) {
     req.admin_username = decoded.username;
     next();
   } catch (err) {
+    logger.warn('Token de admin inválido o expirado', { trace_id: req.traceId, error: err.message });
     res.clearCookie('admin_token');
     return res.redirect('/admin/login');
   }
 }
 
 router.get('/login', (req, res) => {
-  // Si ya tiene una cookie válida, redirige al dashboard directamente
+  
   const token = req.cookies?.admin_token;
   if (token) {
     try {
@@ -37,7 +41,7 @@ router.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'admin-login.html'));
 });
 
-// LOGIN: Generación de JWT y guardado en Cookie segura
+
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -52,38 +56,45 @@ router.post('/login', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      
+      
+      logger.warn('Intento de login fallido: usuario no existe', { trace_id: req.traceId, username, ip: req.ip });
       return res.json({ success: false, mensaje: 'Credenciales incorrectas' });
     }
 
     const admin = result.rows[0];
     const passwordOk = await bcrypt.compare(password, admin.password_hash);
     if (!passwordOk) {
+      logger.warn('Intento de login fallido: contraseña incorrecta', { trace_id: req.traceId, username, admin_id: admin.id, ip: req.ip });
       return res.json({ success: false, mensaje: 'Credenciales incorrectas' });
     }
 
-    // GENERAR JWT con la firma de datos del admin (ID y Usuario)
+    
     const token = jwt.sign(
       { id: admin.id, username: admin.username },
       process.env.JWT_SECRET || 'mi_secreto_super_seguro',
       { expiresIn: '4h' }
     );
 
-    // Guardar el JWT en una Cookie segura HTTP-Only
+    
     res.cookie('admin_token', token, {
-      httpOnly: true, // No accesible por JavaScript para prevenir ataques XSS
+      httpOnly: true, 
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 4 // Expira en 4 horas
+      maxAge: 1000 * 60 * 60 * 4 
     });
+
+    logger.info('Login de administrador exitoso', { trace_id: req.traceId, admin_id: admin.id, username: admin.username, ip: req.ip });
 
     res.json({ success: true, token, redirect: '/admin/dashboard' });
   } catch (err) {
-    console.error('Error login admin:', err.message);
+    logger.error('Error en login de admin', { trace_id: req.traceId, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error del servidor' });
   }
 });
 
-// LOGOUT: Limpiar cookie del Token
+
 router.get('/logout', (req, res) => {
+  logger.info('Logout de administrador', { trace_id: req.traceId, admin_id: req.admin_id });
   res.clearCookie('admin_token');
   res.redirect('/admin/login');
 });
@@ -107,7 +118,7 @@ router.get('/api/quizzes', requireAdmin, async (req, res) => {
     );
     res.json({ success: true, quizzes: result.rows });
   } catch (err) {
-    console.error('Error api/quizzes:', err.message);
+    logger.error('Error al listar quizzes', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al cargar quizzes' });
   }
 });
@@ -168,9 +179,12 @@ router.post('/api/quizzes', requireAdmin, async (req, res) => {
       );
     }
 
+    
+    logger.info('Quiz creado', { trace_id: req.traceId, admin_id: req.admin_id, quiz_id, nombre: nombre.trim(), total_preguntas: preguntas.length });
+
     res.json({ success: true, quiz_id, total_preguntas: preguntas.length });
   } catch (err) {
-    console.error('Error crear quiz:', err.message);
+    logger.error('Error al crear quiz', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al guardar el quiz' });
   }
 });
@@ -179,9 +193,11 @@ router.delete('/api/quizzes/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     await query('DELETE FROM quizzes WHERE id = $1', [id]);
+    
+    logger.warn('Quiz eliminado', { trace_id: req.traceId, admin_id: req.admin_id, quiz_id: id });
     res.json({ success: true });
   } catch (err) {
-    console.error('Error eliminar quiz:', err.message);
+    logger.error('Error al eliminar quiz', { trace_id: req.traceId, admin_id: req.admin_id, quiz_id: req.params.id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al eliminar el quiz' });
   }
 });
@@ -193,7 +209,7 @@ router.get('/api/admins', requireAdmin, async (req, res) => {
     );
     res.json({ success: true, admins: result.rows });
   } catch (err) {
-    console.error('Error api/admins:', err.message);
+    logger.error('Error al listar admins', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al cargar admins' });
   }
 });
@@ -221,9 +237,12 @@ router.post('/api/admins', requireAdmin, async (req, res) => {
       [userLimpio, hash]
     );
 
+    
+    logger.info('Nuevo administrador creado', { trace_id: req.traceId, creado_por: req.admin_id, nuevo_username: userLimpio });
+
     res.json({ success: true, username: userLimpio });
   } catch (err) {
-    console.error('Error crear admin:', err.message);
+    logger.error('Error al crear admin', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al crear el admin' });
   }
 });
@@ -239,9 +258,10 @@ router.delete('/api/admins/:id', requireAdmin, async (req, res) => {
       return res.json({ success: false, mensaje: 'No puedes eliminar el único admin' });
     }
     await query('DELETE FROM admins WHERE id = $1', [id]);
+    logger.warn('Administrador eliminado', { trace_id: req.traceId, eliminado_por: req.admin_id, admin_id_eliminado: id });
     res.json({ success: true });
   } catch (err) {
-    console.error('Error eliminar admin:', err.message);
+    logger.error('Error al eliminar admin', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al eliminar el admin' });
   }
 });
@@ -258,10 +278,61 @@ router.put('/api/admins/:id/password', requireAdmin, async (req, res) => {
     }
     const hash = await bcrypt.hash(password, 10);
     await query('UPDATE admins SET password_hash = $1 WHERE id = $2', [hash, id]);
+    
+    logger.info('Contraseña de administrador actualizada', { trace_id: req.traceId, admin_id: req.admin_id });
     res.json({ success: true });
   } catch (err) {
-    console.error('Error cambiar password:', err.message);
+    logger.error('Error al cambiar password', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
     res.json({ success: false, mensaje: 'Error al cambiar la contraseña' });
+  }
+});
+
+
+
+
+
+router.get('/logs', requireAdmin, (req, res) => {
+  logger.debug('Admin abrió el panel de logs', { trace_id: req.traceId, admin_id: req.admin_id });
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'admin-logs.html'));
+});
+
+
+router.get('/api/logs', requireAdmin, (req, res) => {
+  try {
+    const { fecha, level, module: moduleName, q, usuario, sala, limit, offset } = req.query;
+    const resultado = logReader.filtrarLogs({
+      fecha: fecha || undefined,
+      level: level || undefined,
+      module: moduleName || undefined,
+      q: q || undefined,
+      usuario: usuario || undefined,
+      sala: sala || undefined,
+      limit: limit ? parseInt(limit) : 100,
+      offset: offset ? parseInt(offset) : 0
+    });
+    res.json({ success: true, ...resultado });
+  } catch (err) {
+    logger.error('Error al leer logs desde el panel', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
+    res.json({ success: false, mensaje: 'Error al leer los logs' });
+  }
+});
+
+
+
+router.get('/api/logs/meta', requireAdmin, (req, res) => {
+  try {
+    const fecha = req.query.fecha;
+    res.json({
+      success: true,
+      fechas: logReader.listarFechasDisponibles(),
+      modulos: logReader.listarModulos(fecha),
+      resumen: logReader.resumenPorNivel(fecha),
+      usuarios: listarUsuariosActivos(fecha),
+      salas: listarSalasActivas(fecha)
+    });
+  } catch (err) {
+    logger.error('Error al leer metadatos de logs', { trace_id: req.traceId, admin_id: req.admin_id, error: err.message, stack: err.stack });
+    res.json({ success: false, mensaje: 'Error al leer metadatos' });
   }
 });
 
