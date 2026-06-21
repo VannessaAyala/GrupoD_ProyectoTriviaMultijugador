@@ -3,12 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>Trivia - Perfil</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <div class="container" style="padding-top: 60px;">
     <div class="card">
+      <img id="userPhoto" src="" alt="Foto de perfil" style="width: 100px; height: 100px; border-radius: 50%; margin: 0 auto 10px auto; display: none; object-fit: cover; border: 3px solid var(--color-primary-light);">
       <h2 id="welcomeMsg">Cargando perfil...</h2>
       <p class="text-muted" id="userEmail"></p>
       
@@ -35,9 +37,18 @@
       .then(data => {
         document.getElementById('welcomeMsg').textContent = '¡Hola, ' + data.nickname + '!';
         document.getElementById('userEmail').textContent = data.email;
+        if(data.photo) {
+            const img = document.getElementById('userPhoto');
+            img.onload = () => console.log('Imagen cargada correctamente');
+            img.onerror = (e) => console.error('Error detallado al cargar imagen:', e);
+            img.src = data.photo;
+            img.style.display = 'block';
+            console.log('Intentando cargar imagen:', data.photo);
+        }
         nicknameDeGoogle = data.nickname; // Guardamos el nombre
       })
       .catch(() => window.location.href = '/');
+
 
     // 2. Unirse a la sala
     document.getElementById('btnJoin').addEventListener('click', () => {

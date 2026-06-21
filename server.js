@@ -68,7 +68,11 @@ app.use('/admin', adminRoutes);
 
 app.get('/api/user', (req, res) => {
     if (req.user) {
-        res.json({ nickname: req.user.displayName, email: req.user.emails[0].value });
+        res.json({ 
+            nickname: req.user.displayName, 
+            email: req.user.emails[0].value,
+            photo: req.user.photos && req.user.photos.length > 0 ? req.user.photos[0].value : null
+        });
     } else {
         res.status(401).json({ error: 'No autenticado' });
     }
