@@ -72,11 +72,25 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    const nickname = sessionStorage.getItem('nickname');
-    const roomCode = sessionStorage.getItem('roomCode');
+    // Recuperamos del almacenamiento
+    let nickname = sessionStorage.getItem('nickname');
+    let roomCode = sessionStorage.getItem('roomCode');
 
-    if (!nickname || !roomCode) {
-      window.location.href = '/';
+    // Adaptación para OAuth: Si no hay nickname en storage, pedimos uno.
+    if (!nickname) {
+        nickname = prompt("Por favor, ingresa tu nickname para jugar:") || "Jugador_" + Math.floor(Math.random() * 1000);
+        sessionStorage.setItem('nickname', nickname);
+    }
+    
+    // Si no hay roomCode, lo pedimos.
+    if (!roomCode) {
+      roomCode = prompt("Ingresa el código de la sala:");
+      if(!roomCode) {
+        alert("Necesitas un código de sala para jugar.");
+        window.location.href = '/';
+      } else {
+        sessionStorage.setItem('roomCode', roomCode);
+      }
     }
 
     document.getElementById('displayCode').textContent = roomCode;

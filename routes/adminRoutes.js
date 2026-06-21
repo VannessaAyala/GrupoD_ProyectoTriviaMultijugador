@@ -1,24 +1,43 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const { query } = require('../database/database');
 
 const router = express.Router();
 
+// Middleware local para proteger vistas HTML del Administrador con JWT
 function requireAdmin(req, res, next) {
-  if (req.session && req.session.admin_id) {
-    return next();
+  const token = req.cookies?.admin_token;
+  if (!token) {
+    return res.redirect('/admin/login');
   }
-  res.redirect('/admin/login');
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mi_secreto_super_seguro');
+    req.admin_id = decoded.id;
+    req.admin_username = decoded.username;
+    next();
+  } catch (err) {
+    res.clearCookie('admin_token');
+    return res.redirect('/admin/login');
+  }
 }
 
 router.get('/login', (req, res) => {
-  if (req.session && req.session.admin_id) {
-    return res.redirect('/admin/dashboard');
+  // Si ya tiene una cookie válida, redirige al dashboard directamente
+  const token = req.cookies?.admin_token;
+  if (token) {
+    try {
+      jwt.verify(token, process.env.JWT_SECRET || 'mi_secreto_super_seguro');
+      return res.redirect('/admin/dashboard');
+    } catch (e) {
+      res.clearCookie('admin_token');
+    }
   }
   res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'admin-login.html'));
 });
 
+// LOGIN: Generación de JWT y guardado en Cookie segura
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -42,18 +61,30 @@ router.post('/login', async (req, res) => {
       return res.json({ success: false, mensaje: 'Credenciales incorrectas' });
     }
 
-    req.session.admin_id = admin.id;
-    req.session.admin_username = admin.username;
+    // GENERAR JWT con la firma de datos del admin (ID y Usuario)
+    const token = jwt.sign(
+      { id: admin.id, username: admin.username },
+      process.env.JWT_SECRET || 'mi_secreto_super_seguro',
+      { expiresIn: '4h' }
+    );
 
-    res.json({ success: true, redirect: '/admin/dashboard' });
+    // Guardar el JWT en una Cookie segura HTTP-Only
+    res.cookie('admin_token', token, {
+      httpOnly: true, // No accesible por JavaScript para prevenir ataques XSS
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 1000 * 60 * 60 * 4 // Expira en 4 horas
+    });
+
+    res.json({ success: true, token, redirect: '/admin/dashboard' });
   } catch (err) {
     console.error('Error login admin:', err.message);
     res.json({ success: false, mensaje: 'Error del servidor' });
   }
 });
 
+// LOGOUT: Limpiar cookie del Token
 router.get('/logout', (req, res) => {
-  req.session.destroy();
+  res.clearCookie('admin_token');
   res.redirect('/admin/login');
 });
 
@@ -84,8 +115,8 @@ router.get('/api/quizzes', requireAdmin, async (req, res) => {
 router.get('/api/me', requireAdmin, (req, res) => {
   res.json({
     success: true,
-    admin_id: req.session.admin_id,
-    username: req.session.admin_username
+    admin_id: req.admin_id,
+    username: req.admin_username
   });
 });
 
@@ -200,7 +231,7 @@ router.post('/api/admins', requireAdmin, async (req, res) => {
 router.delete('/api/admins/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    if (parseInt(id) === req.session.admin_id) {
+    if (parseInt(id) === req.admin_id) {
       return res.json({ success: false, mensaje: 'No puedes eliminarte' });
     }
     const total = await query('SELECT COUNT(*) as total FROM admins');
@@ -219,7 +250,7 @@ router.put('/api/admins/:id/password', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (parseInt(id) !== req.session.admin_id) {
+    if (parseInt(id) !== req.admin_id) {
       return res.json({ success: false, mensaje: 'No autorizado' });
     }
     if (!password || password.length < 6) {

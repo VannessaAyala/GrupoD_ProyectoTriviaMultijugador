@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trivia - Perfil</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="padding-top: 60px;">
+    <div class="card">
+      <h2 id="welcomeMsg">Cargando perfil...</h2>
+      <p class="text-muted" id="userEmail"></p>
+      
+      <div class="divider"></div>
+
+      <div>
+        <label style="display: block; margin-bottom: 8px; font-weight: 700; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">Ingresar a una sala</label>
+        <input type="text" id="roomCode" class="input" placeholder="Código de sala (ej: ABC123)" maxlength="6" style="text-transform: uppercase; text-align: center; margin-bottom: 16px;">
+        <button class="btn btn-primary" id="btnJoin">Unirse a la sala</button>
+      </div>
+      
+      <div class="mt-16 text-center">
+        <a href="/auth/logout" class="text-muted" style="font-size: 0.8rem;">Cerrar sesión</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let nicknameDeGoogle = ""; // Variable para guardar el nombre
+
+    // 1. Obtener datos del usuario desde el backend
+    fetch('/api/user')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('welcomeMsg').textContent = '¡Hola, ' + data.nickname + '!';
+        document.getElementById('userEmail').textContent = data.email;
+        nicknameDeGoogle = data.nickname; // Guardamos el nombre
+      })
+      .catch(() => window.location.href = '/');
+
+    // 2. Unirse a la sala
+    document.getElementById('btnJoin').addEventListener('click', () => {
+      const roomCode = document.getElementById('roomCode').value.trim();
+      if (roomCode.length === 6 && nicknameDeGoogle) {
+        sessionStorage.setItem('roomCode', roomCode);
+        sessionStorage.setItem('nickname', nicknameDeGoogle); // GUARDAR AQUÍ
+        window.location.href = '/lobby';
+      } else {
+        alert('Código de sala inválido o perfil no cargado');
+      }
+    });
+  </script>
+</body>
+</html>

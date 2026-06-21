@@ -131,6 +131,21 @@ h1, h2, h3 {
   color: #1a0533;
 }
 
+.btn-google {
+  background: white;
+  color: #333;
+  font-weight: 700;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.btn-google:hover {
+  background: #f1f1f1;
+}
+
 .btn-green {
   background: linear-gradient(135deg, #059669, var(--color-green));
   color: white;
