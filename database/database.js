@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const logger = require('../config/logger').child('database');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -13,22 +14,34 @@ const pool = new Pool({
 
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('Error conectando a PostgreSQL:', err.message);
+    logger.fatal('No se pudo conectar a PostgreSQL', { error: err.message });
     return;
   }
-  console.log('Conectado a PostgreSQL');
+  logger.info('Conectado a PostgreSQL correctamente');
   release();
 });
 
+pool.on('error', (err) => {
+  logger.error('Error inesperado en el pool de PostgreSQL', { error: err.message });
+});
+
 async function query(text, params) {
+  const inicio = Date.now();
   try {
     const result = await pool.query(text, params);
+    const duracionMs = Date.now() - inicio;
+
+    if (duracionMs > 200) {
+      logger.warn('Query lenta detectada', { query: text, duration_ms: duracionMs, rows: result.rowCount });
+    } else {
+      logger.trace('Query ejecutada', { query: text, duration_ms: duracionMs, rows: result.rowCount });
+    }
+
     return result;
   } catch (err) {
-    console.error('Error en query:', text);
+    logger.error('Error ejecutando query', { query: text, error: err.message });
     throw err;
   }
 }
-
 
 module.exports = { pool, query };
