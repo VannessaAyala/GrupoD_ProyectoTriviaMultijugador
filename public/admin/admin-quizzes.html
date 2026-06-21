@@ -57,6 +57,7 @@
         <h1 style="font-size: 1.8rem;">Gestión de Quizzes</h1>
       </div>
       <a href="/admin/dashboard" style="color: var(--color-text-muted); font-size: 0.85rem; text-decoration: none;">Volver al dashboard</a>
+      <a href="/admin/logs" style="color: var(--color-text-muted); font-size: 0.85rem; text-decoration: none; margin-left: 16px;">Ver logs</a>
     </div>
 
     <div class="page-grid">
@@ -151,7 +152,7 @@
     }
 
     async function eliminarQuiz(id) {
-      if (confirm('¿Eliminar?')) {
+      if (confirm('¿ Eliminar ?')) {
         await fetch(`/admin/api/quizzes/${id}`, { method: 'DELETE' });
         cargarQuizzes();
       }
