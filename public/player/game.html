@@ -79,7 +79,7 @@
       window.location.href = '/';
     }
 
-    const socket = io();
+    const socket = io({ transports: ['websocket'] }); // fuerza WebSocket: no depende de sticky sessions para el long-polling
     let miPuntaje = 0;
     let preguntaActual = 0;
     let tiempoTotal = 20;

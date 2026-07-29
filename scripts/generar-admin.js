@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const { query } = require('../database/database');
 
 async function generarAdmin() {
-  const username = 'admin2';
+  const username = 'admin';
   const password = 'admin123';
 
   try {

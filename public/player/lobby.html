@@ -96,7 +96,7 @@
     document.getElementById('displayCode').textContent = roomCode;
     document.getElementById('displayNick').textContent = nickname;
 
-    const socket = io();
+    const socket = io({ transports: ['websocket'] }); // fuerza WebSocket: no depende de sticky sessions para el long-polling
 
     socket.emit('join_room', { roomCode, nickname });
 

@@ -2,8 +2,20 @@ const { query } = require('../database/database');
 const logger = require('../config/logger').child('gameSocket');
 const { publishEvent } = require('../messaging/publisher');
 const { ROUTING_KEYS } = require('../messaging/eventTypes');
+const { getRoom, saveRoom, deleteRoom, withRoomLock } = require('./roomStore');
 
-const roomStates = new Map();
+// El estado de cada sala (jugadores, pregunta actual, puntajes...) YA NO vive
+// acá en memoria: vive en Redis (ver roomStore.js), para que sea visible
+// desde cualquiera de los 5 nodos del clúster, sin importar a cuál se haya
+// conectado cada jugador.
+//
+// Lo único que sigue siendo local a este proceso es el `setInterval` del
+// cronómetro de cada pregunta (un intervalo de JS no se puede guardar en
+// Redis). Vive únicamente en el nodo donde está conectado el admin de esa
+// sala, y cada segundo valida contra Redis si la pregunta ya fue revelada
+// (por ejemplo, porque el último jugador respondió en OTRO nodo) para
+// detenerse solo si corresponde.
+const timers = new Map(); // roomCode -> intervalHandle (solo de este proceso)
 
 function generarCodigoSala() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,6 +34,13 @@ function calcularPuntos(tiempoRespuestaMs, tiempoLimiteMs) {
 
 function obtenerIpSocket(socket) {
   return socket.handshake?.address || socket.request?.connection?.remoteAddress || 'desconocida';
+}
+
+function limpiarTimerLocal(roomCode) {
+  if (timers.has(roomCode)) {
+    clearInterval(timers.get(roomCode));
+    timers.delete(roomCode);
+  }
 }
 
 function initGameSocket(io) {
@@ -58,7 +77,7 @@ function initGameSocket(io) {
           return;
         }
 
-        roomStates.set(codigo, {
+        await saveRoom(codigo, {
           sala_id,
           adminSocketId: socket.id,
           quiz_id,
@@ -67,9 +86,9 @@ function initGameSocket(io) {
           partida_id: null,
           players: new Map(),
           answeredThisQuestion: new Set(),
-          timerInterval: null,
           timerStartedAt: null,
           tiempoLimiteMsActual: null,
+          respuestaRevelada: false,
           estado: 'lobby'
         });
 
@@ -95,41 +114,61 @@ function initGameSocket(io) {
     });
 
     socket.on('join_room', async ({ roomCode, nickname }) => {
+      const code = roomCode.toUpperCase().trim();
+      const nick = nickname.trim();
       try {
-        const code = roomCode.toUpperCase().trim();
-        const nick = nickname.trim();
-
         if (!nick || nick.length < 2 || nick.length > 50) {
           socket.emit('join_error', { mensaje: 'Nickname inválido' });
           return;
         }
 
-        const roomState = roomStates.get(code);
-        if (!roomState) {
+        const resultado = await withRoomLock(code, async (roomState) => {
+          if (!roomState) {
+            return [{ tipo: 'sin_sala' }, null];
+          }
+
+          let jugadorExistente = null;
+          for (const [oldSocketId, player] of roomState.players) {
+            if (player.nickname.toLowerCase() === nick.toLowerCase()) {
+              jugadorExistente = { oldSocketId, player };
+              break;
+            }
+          }
+
+          if (roomState.estado !== 'lobby') {
+            if (!jugadorExistente) {
+              return [{ tipo: 'partida_iniciada' }, null];
+            }
+            const { oldSocketId, player } = jugadorExistente;
+            roomState.players.delete(oldSocketId);
+            player.conectado = true;
+            roomState.players.set(socket.id, player);
+            return [{ tipo: 'reconectado', player }, roomState];
+          }
+
+          if (jugadorExistente) {
+            return [{ tipo: 'nickname_en_uso' }, null];
+          }
+
+          return [{ tipo: 'nuevo', sala_id: roomState.sala_id }, roomState];
+        });
+
+        if (resultado.tipo === 'sin_sala') {
           logger.warn('Intento de unirse a sala inexistente', { socket_id: socket.id, codigo: code, nickname: nick, ip: ipSocket });
           socket.emit('join_error', { mensaje: 'Sala no encontrada' });
           return;
         }
-
-        let jugadorExistente = null;
-        for (const [oldSocketId, player] of roomState.players) {
-          if (player.nickname.toLowerCase() === nick.toLowerCase()) {
-            jugadorExistente = { oldSocketId, player };
-            break;
-          }
+        if (resultado.tipo === 'partida_iniciada') {
+          socket.emit('join_error', { mensaje: 'La partida ya comenzó' });
+          return;
+        }
+        if (resultado.tipo === 'nickname_en_uso') {
+          socket.emit('join_error', { mensaje: 'Nickname en uso' });
+          return;
         }
 
-        if (roomState.estado !== 'lobby') {
-          if (!jugadorExistente) {
-            socket.emit('join_error', { mensaje: 'La partida ya comenzó' });
-            return;
-          }
-
-          const { oldSocketId, player } = jugadorExistente;
-          roomState.players.delete(oldSocketId);
-          player.conectado = true;
-          roomState.players.set(socket.id, player);
-
+        if (resultado.tipo === 'reconectado') {
+          const { player } = resultado;
           socket.join(code);
           socket.roomCode = code;
           socket.isAdmin = false;
@@ -143,34 +182,34 @@ function initGameSocket(io) {
           return;
         }
 
-        if (jugadorExistente) {
-          socket.emit('join_error', { mensaje: 'Nickname en uso' });
-          return;
-        }
-
-        const result = await query(
+        // resultado.tipo === 'nuevo'
+        const dbResult = await query(
           'INSERT INTO jugadores (sala_id, nickname, socket_id, puntaje) VALUES ($1, $2, $3, 0) RETURNING id',
-          [roomState.sala_id, nick, socket.id]
+          [resultado.sala_id, nick, socket.id]
         );
-        const jugador_id = result.rows[0].id;
+        const jugador_id = dbResult.rows[0].id;
 
-        roomState.players.set(socket.id, { nickname: nick, jugador_id, puntaje: 0, conectado: true });
+        const playersArray = await withRoomLock(code, async (roomState) => {
+          if (!roomState) return [{ players: [], adminSocketId: null }, null];
+          roomState.players.set(socket.id, { nickname: nick, jugador_id, puntaje: 0, conectado: true });
+          const arr = getPlayersArray(roomState);
+          return [{ players: arr, adminSocketId: roomState.adminSocketId }, roomState];
+        });
 
         socket.join(code);
         socket.roomCode = code;
         socket.isAdmin = false;
         socket.jugador_id = jugador_id;
 
-        logger.info('Jugador se unió a la sala', { codigo: code, nickname: nick, jugador_id, sala_id: roomState.sala_id, total_jugadores: roomState.players.size, ip: ipSocket });
+        logger.info('Jugador se unió a la sala', { codigo: code, nickname: nick, jugador_id, sala_id: resultado.sala_id, total_jugadores: playersArray.players.length, ip: ipSocket });
 
         socket.emit('join_success', { nickname: nick, roomCode: code });
 
-        const playersArray = getPlayersArray(roomState);
-        io.to(code).emit('player_joined', { nickname: nick, players: playersArray });
-        io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+        io.to(code).emit('player_joined', { nickname: nick, players: playersArray.players });
+        io.to(playersArray.adminSocketId).emit('room_update', { players: playersArray.players, totalJugadores: playersArray.players.length });
 
         publishEvent(ROUTING_KEYS.jugadorUnion(code), {
-          sala_id: roomState.sala_id,
+          sala_id: resultado.sala_id,
           codigo: code,
           jugador_id,
           nickname: nick,
@@ -184,33 +223,48 @@ function initGameSocket(io) {
 
     socket.on('start_game', async ({ roomCode }) => {
       try {
-        const roomState = roomStates.get(roomCode);
-        if (!roomState || socket.id !== roomState.adminSocketId || roomState.estado !== 'lobby') return;
-        if (roomState.players.size === 0) {
+        const datos = await withRoomLock(roomCode, async (roomState) => {
+          if (!roomState || socket.id !== roomState.adminSocketId || roomState.estado !== 'lobby') return [null, null];
+          if (roomState.players.size === 0) return [{ error: 'sin_jugadores' }, null];
+          return [{
+            sala_id: roomState.sala_id,
+            jugadores: [...roomState.players.values()].map(p => p.nickname),
+            totalJugadores: roomState.players.size
+          }, roomState];
+        });
+
+        if (!datos) return;
+        if (datos.error === 'sin_jugadores') {
           socket.emit('error_sala', { mensaje: 'No hay jugadores' });
           return;
         }
 
-        const result = await query('INSERT INTO partidas (sala_id, pregunta_actual) VALUES ($1, 0) RETURNING id', [roomState.sala_id]);
-        roomState.partida_id = result.rows[0].id;
-        await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', roomState.sala_id]);
-        roomState.estado = 'jugando';
+        const result = await query('INSERT INTO partidas (sala_id, pregunta_actual) VALUES ($1, 0) RETURNING id', [datos.sala_id]);
+        const partida_id = result.rows[0].id;
+        await query('UPDATE salas SET estado = $1 WHERE id = $2', ['jugando', datos.sala_id]);
+
+        const roomStateFinal = await withRoomLock(roomCode, async (roomState) => {
+          if (!roomState) return [null, null];
+          roomState.partida_id = partida_id;
+          roomState.estado = 'jugando';
+          return [roomState, roomState];
+        });
 
         logger.info('Partida iniciada', {
           codigo: roomCode,
-          sala_id: roomState.sala_id,
-          partida_id: roomState.partida_id,
-          total_jugadores: roomState.players.size,
-          jugadores: [...roomState.players.values()].map(p => p.nickname)
+          sala_id: datos.sala_id,
+          partida_id,
+          total_jugadores: datos.totalJugadores,
+          jugadores: datos.jugadores
         });
 
-        io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
+        io.to(roomCode).emit('start_game', { totalPreguntas: roomStateFinal.preguntas.length });
 
         publishEvent(ROUTING_KEYS.partidaIniciada(roomCode), {
-          sala_id: roomState.sala_id,
+          sala_id: datos.sala_id,
           codigo: roomCode,
-          partida_id: roomState.partida_id,
-          total_jugadores: roomState.players.size,
+          partida_id,
+          total_jugadores: datos.totalJugadores,
           evento: 'iniciada',
           timestamp: new Date().toISOString()
         });
@@ -221,13 +275,15 @@ function initGameSocket(io) {
 
     socket.on('next_question', async ({ roomCode }) => {
       try {
-        const roomState = roomStates.get(roomCode);
+        const roomState = await getRoom(roomCode);
         if (!roomState || socket.id !== roomState.adminSocketId || roomState.estado !== 'jugando') return;
 
-        if (roomState.timerInterval) clearInterval(roomState.timerInterval);
+        // El cronómetro de la pregunta anterior (si existe) es local a este
+        // nodo, porque el admin siempre dispara next_question desde el mismo
+        // nodo al que está conectado.
+        limpiarTimerLocal(roomCode);
 
-        roomState.currentQuestionIndex++;
-        const idx = roomState.currentQuestionIndex;
+        const idx = roomState.currentQuestionIndex + 1;
 
         if (idx >= roomState.preguntas.length) {
           socket.emit('no_more_questions', {});
@@ -235,9 +291,16 @@ function initGameSocket(io) {
         }
 
         const pregunta = roomState.preguntas[idx];
-        roomState.answeredThisQuestion = new Set();
-        roomState.tiempoLimiteMsActual = pregunta.tiempo_segundos * 1000;
-        roomState.timerStartedAt = Date.now();
+
+        await withRoomLock(roomCode, async (rs) => {
+          if (!rs) return [null, null];
+          rs.currentQuestionIndex = idx;
+          rs.answeredThisQuestion = new Set();
+          rs.tiempoLimiteMsActual = pregunta.tiempo_segundos * 1000;
+          rs.timerStartedAt = Date.now();
+          rs.respuestaRevelada = false;
+          return [null, rs];
+        });
 
         await query('UPDATE partidas SET pregunta_actual = $1 WHERE id = $2', [idx + 1, roomState.partida_id]);
 
@@ -264,14 +327,29 @@ function initGameSocket(io) {
         socket.broadcast.to(roomCode).emit('question', pData);
 
         let s = pregunta.tiempo_segundos;
-        roomState.timerInterval = setInterval(async () => {
-          s--;
-          io.to(roomCode).emit('timer', { segundos: s });
-          if (s <= 0) {
-            clearInterval(roomState.timerInterval);
-            await revelarRespuesta(io, roomCode, roomState, pregunta);
+        const interval = setInterval(async () => {
+          try {
+            // Puede que otro nodo ya haya revelado la respuesta (porque el
+            // último jugador conectado a ÉL contestó antes de que acabara el
+            // tiempo). En ese caso, este nodo solo necesita enterarse y parar.
+            const freshState = await getRoom(roomCode);
+            if (!freshState || freshState.currentQuestionIndex !== idx || freshState.respuestaRevelada) {
+              limpiarTimerLocal(roomCode);
+              return;
+            }
+
+            s--;
+            io.to(roomCode).emit('timer', { segundos: s });
+
+            if (s <= 0) {
+              limpiarTimerLocal(roomCode);
+              await revelarSiCorresponde(io, roomCode, pregunta, idx);
+            }
+          } catch (err) {
+            logger.error('Error en el cronómetro de la pregunta', { roomCode, error: err.message });
           }
         }, 1000);
+        timers.set(roomCode, interval);
       } catch (err) {
         logger.error('Error al avanzar pregunta', { roomCode, error: err.message, stack: err.stack });
       }
@@ -279,66 +357,108 @@ function initGameSocket(io) {
 
     socket.on('submit_answer', async ({ roomCode, respuesta }) => {
       try {
-        const roomState = roomStates.get(roomCode);
-        if (!roomState || roomState.estado !== 'jugando' || roomState.currentQuestionIndex < 0) return;
+        let datosDB = null;
 
-        const player = roomState.players.get(socket.id);
-        if (!player || roomState.answeredThisQuestion.has(player.jugador_id)) return;
-        if (!['A', 'B', 'C', 'D'].includes(respuesta)) return;
+        const resultado = await withRoomLock(roomCode, async (roomState) => {
+          if (!roomState || roomState.estado !== 'jugando' || roomState.currentQuestionIndex < 0) return [null, null];
 
-        roomState.answeredThisQuestion.add(player.jugador_id);
+          const player = roomState.players.get(socket.id);
+          if (!player || roomState.answeredThisQuestion.has(player.jugador_id)) return [null, null];
+          if (!['A', 'B', 'C', 'D'].includes(respuesta)) return [null, null];
 
-        const pregunta = roomState.preguntas[roomState.currentQuestionIndex];
-        const t = Date.now() - roomState.timerStartedAt;
-        const correct = respuesta === pregunta.correcta;
-        const pts = correct ? calcularPuntos(t, roomState.tiempoLimiteMsActual) : 0;
+          roomState.answeredThisQuestion.add(player.jugador_id);
 
-        player.puntaje += pts;
+          const pregunta = roomState.preguntas[roomState.currentQuestionIndex];
+          const t = Date.now() - roomState.timerStartedAt;
+          const correct = respuesta === pregunta.correcta;
+          const pts = correct ? calcularPuntos(t, roomState.tiempoLimiteMsActual) : 0;
+
+          player.puntaje += pts;
+          roomState.players.set(socket.id, player);
+
+          const conectados = [...roomState.players.values()].filter(p => p.conectado).length;
+          const respondidos = [...roomState.answeredThisQuestion].filter(jid =>
+            [...roomState.players.values()].some(p => p.jugador_id === jid && p.conectado)
+          ).length;
+
+          let leaderboard = null;
+          if (respondidos >= conectados && !roomState.respuestaRevelada) {
+            roomState.respuestaRevelada = true;
+            leaderboard = getLeaderboard(roomState);
+          }
+
+          datosDB = {
+            partida_id: roomState.partida_id,
+            jugador_id: player.jugador_id,
+            pregunta_id: pregunta.id,
+            sala_id: roomState.sala_id,
+            respuesta,
+            correct,
+            pts,
+            t,
+            tiempoLimiteMsActual: roomState.tiempoLimiteMsActual,
+            nickname: player.nickname
+          };
+
+          return [{
+            correct,
+            pts,
+            puntajeTotal: player.puntaje,
+            respondidos,
+            conectados,
+            leaderboard,
+            respuestaCorrecta: pregunta.correcta,
+            adminSocketId: roomState.adminSocketId
+          }, roomState];
+        });
+
+        if (!resultado || !datosDB) return;
+
         await query(
           'INSERT INTO respuestas (partida_id, jugador_id, pregunta_id, respuesta_dada, es_correcta, puntos_ganados, tiempo_respuesta_ms) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-          [roomState.partida_id, player.jugador_id, pregunta.id, respuesta, correct, pts, t]
+          [datosDB.partida_id, datosDB.jugador_id, datosDB.pregunta_id, datosDB.respuesta, datosDB.correct, datosDB.pts, datosDB.t]
         );
-        await query('UPDATE jugadores SET puntaje = $1 WHERE id = $2', [player.puntaje, player.jugador_id]);
+        await query('UPDATE jugadores SET puntaje = $1 WHERE id = $2', [resultado.puntajeTotal, datosDB.jugador_id]);
 
         logger.trace('Respuesta de jugador registrada', {
           codigo: roomCode,
-          jugador_id: player.jugador_id,
-          nickname: player.nickname,
-          pregunta_id: pregunta.id,
-          pregunta_num: roomState.currentQuestionIndex + 1,
-          respuesta,
-          correcta: pregunta.correcta,
-          es_correcta: correct,
-          puntos_ganados: pts,
-          tiempo_respuesta_ms: t,
+          jugador_id: datosDB.jugador_id,
+          nickname: datosDB.nickname,
+          pregunta_id: datosDB.pregunta_id,
+          respuesta: datosDB.respuesta,
+          correcta: resultado.respuestaCorrecta,
+          es_correcta: datosDB.correct,
+          puntos_ganados: datosDB.pts,
+          tiempo_respuesta_ms: datosDB.t,
           ip: ipSocket
         });
 
-        socket.emit('answer_result', { esCorrecta: correct, puntosGanados: pts, puntajeTotal: player.puntaje });
+        socket.emit('answer_result', { esCorrecta: resultado.correct, puntosGanados: resultado.pts, puntajeTotal: resultado.puntajeTotal });
 
         publishEvent(ROUTING_KEYS.respuesta(roomCode), {
-          sala_id: roomState.sala_id,
+          sala_id: datosDB.sala_id,
           codigo: roomCode,
-          partida_id: roomState.partida_id,
-          jugador_id: player.jugador_id,
-          nickname: player.nickname,
-          pregunta_id: pregunta.id,
-          respuesta_dada: respuesta,
-          es_correcta: correct,
-          puntos_ganados: pts,
-          tiempo_respuesta_ms: t,
-          tiempo_limite_ms: roomState.tiempoLimiteMsActual,
+          partida_id: datosDB.partida_id,
+          jugador_id: datosDB.jugador_id,
+          nickname: datosDB.nickname,
+          pregunta_id: datosDB.pregunta_id,
+          respuesta_dada: datosDB.respuesta,
+          es_correcta: datosDB.correct,
+          puntos_ganados: datosDB.pts,
+          tiempo_respuesta_ms: datosDB.t,
+          tiempo_limite_ms: datosDB.tiempoLimiteMsActual,
           timestamp: new Date().toISOString()
         });
 
-        const conectados = [...roomState.players.values()].filter(p => p.conectado).length;
-        const respondidos = [...roomState.answeredThisQuestion].filter(jid => [...roomState.players.values()].some(p => p.jugador_id === jid && p.conectado)).length;
+        io.to(resultado.adminSocketId).emit('answers_update', { respondidos: resultado.respondidos, total: resultado.conectados, ultimoNickname: datosDB.nickname });
 
-        io.to(roomState.adminSocketId).emit('answers_update', { respondidos, total: conectados, ultimoNickname: player.nickname });
-
-        if (respondidos >= conectados) {
-          if (roomState.timerInterval) clearInterval(roomState.timerInterval);
-          await revelarRespuesta(io, roomCode, roomState, pregunta);
+        if (resultado.leaderboard) {
+          // Puede que el timer siga corriendo en el nodo del admin (otro
+          // proceso); él mismo se dará cuenta en su próximo tick (máx. 1s)
+          // gracias a `respuestaRevelada`. Si el timer está en ESTE nodo, se
+          // limpia de una vez para no esperar ese tick.
+          limpiarTimerLocal(roomCode);
+          io.to(roomCode).emit('question_result', { respuestaCorrecta: resultado.respuestaCorrecta, leaderboard: resultado.leaderboard });
         }
       } catch (err) {
         logger.error('Error al procesar respuesta', { roomCode, socket_id: socket.id, error: err.message, stack: err.stack });
@@ -347,15 +467,15 @@ function initGameSocket(io) {
 
     socket.on('game_finished', async ({ roomCode }) => {
       try {
-        const roomState = roomStates.get(roomCode);
+        const roomState = await getRoom(roomCode);
         if (roomState && socket.id === roomState.adminSocketId) await terminarPartida(io, roomCode, roomState);
       } catch (err) {
         logger.error('Error al finalizar la partida', { roomCode, error: err.message, stack: err.stack });
       }
     });
 
-    socket.on('get_leaderboard', ({ roomCode }) => {
-      const roomState = roomStates.get(roomCode);
+    socket.on('get_leaderboard', async ({ roomCode }) => {
+      const roomState = await getRoom(roomCode);
       if (roomState && socket.id === roomState.adminSocketId) socket.emit('leaderboard', { leaderboard: getLeaderboard(roomState) });
     });
 
@@ -365,22 +485,35 @@ function initGameSocket(io) {
         logger.debug('Socket desconectado sin sala asociada', { socket_id: socket.id, ip: ipSocket });
         return;
       }
-      const roomState = roomStates.get(roomCode);
-      if (!roomState) return;
 
-      if (socket.isAdmin) {
-        logger.warn('Administrador de sala desconectado', { codigo: roomCode, sala_id: roomState.sala_id, ip: ipSocket });
-        io.to(roomCode).emit('admin_disconnected', { mensaje: 'Admin desconectado' });
-      } else {
-        const player = roomState.players.get(socket.id);
-        if (player) {
-          player.conectado = false;
-          await query('UPDATE jugadores SET conectado = false WHERE id = $1', [player.jugador_id]);
-          logger.info('Jugador desconectado de la sala', { codigo: roomCode, nickname: player.nickname, jugador_id: player.jugador_id, puntaje_al_salir: player.puntaje, ip: ipSocket });
-          const playersArray = getPlayersArray(roomState);
-          io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
-          io.to(roomCode).emit('player_left', { nickname: player.nickname, players: playersArray });
+      try {
+        if (socket.isAdmin) {
+          const roomState = await getRoom(roomCode);
+          if (!roomState) return;
+          logger.warn('Administrador de sala desconectado', { codigo: roomCode, sala_id: roomState.sala_id, ip: ipSocket });
+          limpiarTimerLocal(roomCode);
+          io.to(roomCode).emit('admin_disconnected', { mensaje: 'Admin desconectado' });
+          return;
         }
+
+        const datos = await withRoomLock(roomCode, async (roomState) => {
+          if (!roomState) return [null, null];
+          const player = roomState.players.get(socket.id);
+          if (!player) return [null, null];
+          player.conectado = false;
+          roomState.players.set(socket.id, player);
+          return [{ player, playersArray: getPlayersArray(roomState), adminSocketId: roomState.adminSocketId }, roomState];
+        });
+
+        if (!datos) return;
+
+        await query('UPDATE jugadores SET conectado = false WHERE id = $1', [datos.player.jugador_id]);
+        logger.info('Jugador desconectado de la sala', { codigo: roomCode, nickname: datos.player.nickname, jugador_id: datos.player.jugador_id, puntaje_al_salir: datos.player.puntaje, ip: ipSocket });
+
+        io.to(datos.adminSocketId).emit('room_update', { players: datos.playersArray, totalJugadores: datos.playersArray.length });
+        io.to(roomCode).emit('player_left', { nickname: datos.player.nickname, players: datos.playersArray });
+      } catch (err) {
+        logger.error('Error al procesar desconexión', { roomCode, socket_id: socket.id, error: err.message, stack: err.stack });
       }
     });
   });
@@ -403,41 +536,58 @@ function getPlayersArray(roomState) {
   return players;
 }
 
-async function revelarRespuesta(io, roomCode, roomState, pregunta) {
-  io.to(roomCode).emit('question_result', { respuestaCorrecta: pregunta.correcta, leaderboard: getLeaderboard(roomState) });
+// Usado desde el cronómetro cuando se agota el tiempo (a diferencia de
+// submit_answer, acá SÍ puede haber una condición de carrera con el propio
+// jugador contestando justo en el límite, por eso también pasa por el lock).
+async function revelarSiCorresponde(io, roomCode, preguntaEsperada, idxEsperado) {
+  const leaderboard = await withRoomLock(roomCode, async (roomState) => {
+    if (!roomState || roomState.respuestaRevelada || roomState.currentQuestionIndex !== idxEsperado) {
+      return [null, null];
+    }
+    roomState.respuestaRevelada = true;
+    return [getLeaderboard(roomState), roomState];
+  });
+
+  if (leaderboard) {
+    io.to(roomCode).emit('question_result', { respuestaCorrecta: preguntaEsperada.correcta, leaderboard });
+  }
 }
 
-async function terminarPartida(io, roomCode, roomState) {
+async function terminarPartida(io, roomCode, roomStateInicial) {
   try {
-    if (roomState.timerInterval) clearInterval(roomState.timerInterval);
-    await query('UPDATE salas SET estado = $1 WHERE id = $2', ['terminada', roomState.sala_id]);
-    await query('UPDATE partidas SET terminada_en = NOW() WHERE id = $1', [roomState.partida_id]);
+    limpiarTimerLocal(roomCode);
+
+    const roomStateActual = (await getRoom(roomCode)) || roomStateInicial;
+
+    await query('UPDATE salas SET estado = $1 WHERE id = $2', ['terminada', roomStateActual.sala_id]);
+    await query('UPDATE partidas SET terminada_en = NOW() WHERE id = $1', [roomStateActual.partida_id]);
+
+    const leaderboard = getLeaderboard(roomStateActual);
 
     logger.info('Partida finalizada', {
       codigo: roomCode,
-      sala_id: roomState.sala_id,
-      partida_id: roomState.partida_id,
-      total_jugadores: roomState.players.size,
-      ganador: getLeaderboard(roomState)[0]?.nickname || 'sin jugadores'
+      sala_id: roomStateActual.sala_id,
+      partida_id: roomStateActual.partida_id,
+      total_jugadores: roomStateActual.players.size,
+      ganador: leaderboard[0]?.nickname || 'sin jugadores'
     });
 
-    io.to(roomCode).emit('game_finished', { leaderboard: getLeaderboard(roomState) });
+    io.to(roomCode).emit('game_finished', { leaderboard });
 
     publishEvent(ROUTING_KEYS.partidaTerminada(roomCode), {
-      sala_id: roomState.sala_id,
+      sala_id: roomStateActual.sala_id,
       codigo: roomCode,
-      partida_id: roomState.partida_id,
-      total_jugadores: roomState.players.size,
-      ganador: getLeaderboard(roomState)[0]?.nickname || null,
+      partida_id: roomStateActual.partida_id,
+      total_jugadores: roomStateActual.players.size,
+      ganador: leaderboard[0]?.nickname || null,
       evento: 'terminada',
       timestamp: new Date().toISOString()
     });
 
-    setTimeout(() => roomStates.delete(roomCode), 30000);
+    setTimeout(() => { deleteRoom(roomCode).catch(() => {}); }, 30000);
   } catch (err) {
     logger.error('Error al terminar la partida', { roomCode, error: err.message, stack: err.stack });
   }
 }
-
 
 module.exports = { initGameSocket };

@@ -192,7 +192,7 @@
     let partidaIniciada = false;
     let totalJugadores = 0;
 
-    const socket = io();
+    const socket = io({ transports: ['websocket'] }); // fuerza WebSocket: no depende de sticky sessions para el long-polling
 
     async function init() {
       try {

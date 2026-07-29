@@ -123,14 +123,23 @@ const logger = winston.createLogger({
 
 
 
+// ANTES: esta función llamaba a winston.createLogger(...) de nuevo en cada
+// invocación, reusando el MISMO array `transports` (los mismos objetos
+// Console/DailyRotateFile). Cada winston.createLogger() nuevo se suscribe con
+// sus propios listeners ('error', 'close', 'finish', 'pipe', 'unpipe',
+// 'drain') a esos transports compartidos, así que con ~11 módulos llamando
+// a logger.child(...) en el arranque, cada transport terminaba con 11
+// listeners de cada tipo -> de ahí los MaxListenersExceededWarning que
+// veíamos en los logs. Nunca llegó a tumbar el proceso, pero es un memory
+// leak real que iba a crecer con el tiempo (o si algún módulo llama a
+// .child() dinámicamente, ej. por request).
+//
+// AHORA: usamos el .child() nativo de winston, que solo combina el
+// defaultMeta con el logger padre y NO vuelve a suscribirse a los
+// transports ni crea instancias nuevas.
+const childNativo = logger.child.bind(logger);
 logger.child = function (moduleName) {
-  return winston.createLogger({
-    levels,
-    level: logger.level,
-    format: formatoArchivo,
-    transports,
-    defaultMeta: { module: moduleName }
-  });
+  return childNativo({ module: moduleName });
 };
 
 module.exports = logger;

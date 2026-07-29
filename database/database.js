@@ -1,13 +1,20 @@
 const { Pool } = require('pg');
 const logger = require('../config/logger').child('database');
 
-const isProduction = process.env.NODE_ENV === 'production';
-
 const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:123@localhost:5432/trivia_db';
+
+// OJO: antes esto se activaba con `NODE_ENV=production` (que es como corren
+// los nodos dentro de Docker), pero el contenedor postgres:16-alpine del
+// docker-compose NO tiene SSL habilitado -> todas las queries fallaban con
+// "The server does not support SSL connections". El SSL de la conexión a la
+// base de datos es independiente del entorno (dev/prod); se activa solo si
+// explícitamente se pide con DATABASE_SSL=true (por ejemplo, contra un
+// Postgres administrado como RDS/Neon que sí lo exige).
+const sslActivado = process.env.DATABASE_SSL === 'true';
 
 const pool = new Pool({
   connectionString: connectionString,
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
+  ssl: sslActivado ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000
 });

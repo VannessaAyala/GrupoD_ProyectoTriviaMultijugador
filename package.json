@@ -16,12 +16,15 @@
     "start:all": "concurrently -n SERVER,ANALITICA,ALERTAS,PARTIDAS-1,PARTIDAS-2,SALA-TTL,DLQ-RESP,DLQ-ALERT -c blue,green,magenta,yellow,yellowBright,cyan,red,redBright \"npm:dev\" \"npm:consumer:analitica\" \"npm:consumer:alertas\" \"npm:consumer:partidas:1\" \"npm:consumer:partidas:2\" \"npm:consumer:sala-abandonada\" \"npm:consumer:dlq-respuestas\" \"npm:consumer:dlq-alertas\""
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "amqplib": "^0.10.9",
     "bcrypt": "^5.1.1",
+    "connect-redis": "^8.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "express-session": "^1.19.0",
+    "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.3",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
