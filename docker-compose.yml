@@ -1,0 +1,262 @@
+x-nodo-env: &nodo-env
+  NODE_ENV: production
+  PORT: 3000
+  DATABASE_URL: postgresql://postgres:123@postgres:5432/trivia_db
+  RABBITMQ_URL: amqp://trivia:trivia123@rabbitmq:5672
+  REDIS_URL: redis://redis:6379
+
+x-nodo-depends-on: &nodo-depends-on
+  postgres:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  # ---------- Base de datos ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: trivia-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123"
+      POSTGRES_DB: trivia_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/database.sql:/docker-entrypoint-initdb.d/01-database.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trivia_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - red-cluster
+
+  # ---------- Mensajería ----------
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: trivia-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: trivia
+      RABBITMQ_DEFAULT_PASS: trivia123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - red-cluster
+
+  # ---------- Estado compartido del clúster ----------
+  # Guarda acá lo que antes vivía en memoria de cada nodo (roomStates de
+  # gameSocket.js y sesiones de Express/Passport), y sirve como bus pub/sub
+  # para que Socket.IO reparta eventos entre los 5 nodos (@socket.io/redis-adapter).
+  redis:
+    image: redis:7-alpine
+    container_name: trivia-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - red-cluster
+
+  # ---------- Nodos del clúster (antes: servidor-base) ----------
+  nodo1:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Nodo A"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  nodo2:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Nodo B"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  nodo3:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Nodo C"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  nodo4:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Nodo D"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  nodo5:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Nodo E"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  # ---------- Balanceador de carga ----------
+  balanceador:
+    image: nginx:alpine
+    container_name: trivia-balanceador
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      nodo1: { condition: service_healthy }
+      nodo2: { condition: service_healthy }
+      nodo3: { condition: service_healthy }
+      nodo4: { condition: service_healthy }
+      nodo5: { condition: service_healthy }
+    networks:
+      - red-cluster
+
+  # ---------- Consumidores de RabbitMQ (procesos independientes del clúster web) ----------
+  consumer-analitica:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer Analitica"
+    command: ["node", "consumers/analiticaRespuestasConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-alertas:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer Alertas"
+    command: ["node", "consumers/alertasRespuestasConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-partidas-1:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer Partidas 1"
+      CONSUMER_ID: "partidas-1"
+    command: ["node", "consumers/partidasEventosConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-partidas-2:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer Partidas 2"
+      CONSUMER_ID: "partidas-2"
+    command: ["node", "consumers/partidasEventosConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-sala-abandonada:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer Sala Abandonada"
+    command: ["node", "consumers/salaAbandonadaConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-dlq-respuestas:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer DLQ Respuestas"
+    command: ["node", "consumers/dlqRespuestasInvalidasConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+  consumer-dlq-alertas:
+    build: { context: . }
+    env_file: .env
+    environment:
+      <<: *nodo-env
+      NODE_NAME: "Consumer DLQ Alertas"
+    command: ["node", "consumers/dlqAlertasRechazadasConsumer.js"]
+    depends_on: *nodo-depends-on
+    networks:
+      - red-cluster
+
+networks:
+  red-cluster:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:

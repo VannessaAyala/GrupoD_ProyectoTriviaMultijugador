@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trivia - Unirse</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="padding-top: 60px;">
+    <div class="logo">
+      <h1>Trivia!</h1>
+      <p class="subtitle">Multijugador en tiempo real</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom: 24px; font-size: 1.4rem;">Unirse a una sala</h2>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <label style="display: block; margin-bottom: 8px; font-weight: 700; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">Tu nickname</label>
+          <input
+            type="text"
+            id="nickname"
+            class="input"
+            placeholder="Ej: ProGamer99"
+            maxlength="20"
+            autocomplete="off"
+          >
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 8px; font-weight: 700; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">Código de sala</label>
+          <input
+            type="text"
+            id="roomCode"
+            class="input"
+            placeholder="Ej: ABC123"
+            maxlength="6"
+            autocomplete="off"
+            style="text-transform: uppercase; font-size: 1.3rem; letter-spacing: 4px; text-align: center;"
+          >
+        </div>
+
+        <button class="btn btn-accent" id="btnJoin" style="margin-top: 8px;">
+          Entrar a la sala
+        </button>
+
+        <!-- Botón de Google -->
+        <a href="/auth/google" class="btn btn-google">
+          Iniciar sesión con Google
+        </a>
+
+        <div class="alert alert-error" id="errorMsg"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <p class="text-center text-muted" style="font-size: 0.85rem;">
+        ¿Eres administrador? <a href="/admin/login" style="color: var(--color-primary-light); text-decoration: none; font-weight: 700;">Accede aquí</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const nicknameInput = document.getElementById('nickname');
+    const roomCodeInput = document.getElementById('roomCode');
+    const btnJoin = document.getElementById('btnJoin');
+    const errorMsg = document.getElementById('errorMsg');
+
+    roomCodeInput.addEventListener('input', (e) => {
+      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    });
+
+    [nicknameInput, roomCodeInput].forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') unirse();
+      });
+    });
+
+    btnJoin.addEventListener('click', unirse);
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.className = 'alert alert-error show';
+    }
+
+    function hideError() {
+      errorMsg.className = 'alert alert-error';
+    }
+
+    function unirse() {
+      hideError();
+      const nickname = nicknameInput.value.trim();
+      const roomCode = roomCodeInput.value.trim();
+
+      if (!nickname || nickname.length < 2) {
+        showError('El nickname debe tener al menos 2 caracteres');
+        nicknameInput.focus();
+        return;
+      }
+      if (!roomCode || roomCode.length !== 6) {
+        showError('El código de sala debe tener 6 caracteres');
+        roomCodeInput.focus();
+        return;
+      }
+
+      sessionStorage.setItem('nickname', nickname);
+      sessionStorage.setItem('roomCode', roomCode);
+      window.location.href = '/player/lobby';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trivia - Resultados</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="padding-top: 40px;">
+    <div class="logo">
+      <h1>Resultados</h1>
+      <p class="subtitle">¡La partida ha terminado!</p>
+    </div>
+
+    <div class="card" style="text-align: center; margin-bottom: 20px;" id="miResultado">
+      <h2 style="font-size: 1.4rem; margin-bottom: 8px;" id="miNickname">...</h2>
+      <p class="text-muted" style="font-size: 0.9rem; margin-bottom: 16px;" id="miPosicion">Posición: -</p>
+      <div style="background: var(--color-surface); border-radius: var(--radius-sm); padding: 20px;">
+        <p class="text-muted" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Puntaje final</p>
+        <p style="font-family: 'Fredoka One', cursive; font-size: 2.5rem; color: var(--color-accent-light);" id="miPuntajeFinal">0</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Ranking final</h3>
+      <ul class="ranking-list" id="rankingFinal"></ul>
+    </div>
+
+    <div style="margin-top: 24px;">
+      <button class="btn btn-primary" onclick="volverAlInicio()">
+        Jugar otra vez
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const nickname = sessionStorage.getItem('nickname');
+    const leaderboardData = sessionStorage.getItem('leaderboard');
+    const miPuntajeGuardado = sessionStorage.getItem('miPuntaje');
+
+    if (!nickname || !leaderboardData) {
+      window.location.href = '/';
+    }
+
+    const leaderboard = JSON.parse(leaderboardData || '[]');
+    const miPosicionObj = leaderboard.find(p => p.nickname === nickname);
+
+    document.getElementById('miNickname').textContent = nickname;
+    document.getElementById('miPuntajeFinal').textContent = (miPuntajeGuardado || 0).toLocaleString();
+
+    if (miPosicionObj) {
+      document.getElementById('miPosicion').textContent = `Posición #${miPosicionObj.posicion}`;
+    }
+
+    const rankEl = document.getElementById('rankingFinal');
+    leaderboard.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.className = 'ranking-item';
+      const esYo = p.nickname === nickname;
+      if (esYo) li.style.border = '1px solid rgba(245,158,11,0.4)';
+      li.innerHTML = `
+        <span class="ranking-pos">${i + 1}</span>
+        <span class="ranking-name" style="${esYo ? 'color: var(--color-accent-light); font-weight: 800;' : ''}">${p.nickname}</span>
+        <span class="ranking-score">${p.puntaje.toLocaleString()}</span>
+      `;
+      rankEl.appendChild(li);
+    });
+
+    function volverAlInicio() {
+      // Limpiar datos del juego, pero no la sesión de usuario
+      sessionStorage.removeItem('roomCode');
+      sessionStorage.removeItem('nickname');
+      sessionStorage.removeItem('leaderboard');
+      sessionStorage.removeItem('miPuntaje');
+      window.location.href = '/perfil';
+    }
+  </script>
+</body>
+</html>

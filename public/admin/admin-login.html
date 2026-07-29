@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Login</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="padding-top: 80px;">
+    <div class="logo">
+      <h1>Admin</h1>
+      <p class="subtitle">Panel de control</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom: 24px; font-size: 1.3rem;">Iniciar sesión</h2>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <label style="display: block; margin-bottom: 8px; font-weight: 700; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">Usuario</label>
+          <input type="text" id="username" class="input" placeholder="admin" autocomplete="username">
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 8px; font-weight: 700; color: var(--color-text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">Contraseña</label>
+          <input type="password" id="password" class="input" placeholder="••••••••" autocomplete="current-password">
+        </div>
+
+        <button class="btn btn-primary" id="btnLogin" style="margin-top: 8px;">
+          Entrar al panel
+        </button>
+
+        <div class="alert alert-error" id="errorMsg"></div>
+      </div>
+    </div>
+
+    <p class="text-center" style="margin-top: 20px; font-size: 0.85rem;">
+      <a href="/" style="color: var(--color-text-muted); text-decoration: none;">Ir al área de jugadores</a>
+    </p>
+  </div>
+
+  <script>
+    const btnLogin = document.getElementById('btnLogin');
+    const errorMsg = document.getElementById('errorMsg');
+
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') login();
+    });
+    btnLogin.addEventListener('click', login);
+
+    async function login() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!username || !password) {
+        showError('Completa todos los campos');
+        return;
+      }
+
+      btnLogin.disabled = true;
+      btnLogin.textContent = 'Verificando...';
+      hideError();
+
+      try {
+        const res = await fetch('/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          window.location.href = data.redirect;
+        } else {
+          showError(data.mensaje || 'Error al iniciar sesión');
+          btnLogin.disabled = false;
+          btnLogin.textContent = 'Entrar al panel';
+        }
+      } catch (err) {
+        showError('Error de conexión');
+        btnLogin.disabled = false;
+        btnLogin.textContent = 'Entrar al panel';
+      }
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.className = 'alert alert-error show';
+    }
+    function hideError() {
+      errorMsg.className = 'alert alert-error';
+    }
+  </script>
+</body>
+</html>
