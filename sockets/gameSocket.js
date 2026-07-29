@@ -1,5 +1,7 @@
 const { query } = require('../database/database');
 const logger = require('../config/logger').child('gameSocket');
+const { publishEvent } = require('../messaging/publisher');
+const { ROUTING_KEYS } = require('../messaging/eventTypes');
 
 const roomStates = new Map();
 
@@ -78,6 +80,14 @@ function initGameSocket(io) {
         logger.info('Sala de juego creada', { codigo, sala_id, quiz_id, admin_id, total_preguntas: preguntas.length, ip: ipSocket });
 
         socket.emit('room_created', { codigo, sala_id, totalPreguntas: preguntas.length });
+
+        publishEvent(ROUTING_KEYS.salaCreada(codigo), {
+          sala_id,
+          codigo,
+          quiz_id,
+          admin_id,
+          timestamp: new Date().toISOString()
+        });
       } catch (err) {
         logger.error('Error al crear la sala', { socket_id: socket.id, quiz_id, admin_id, ip: ipSocket, error: err.message, stack: err.stack });
         socket.emit('error_sala', { mensaje: 'Error al crear la sala' });
@@ -158,6 +168,14 @@ function initGameSocket(io) {
         const playersArray = getPlayersArray(roomState);
         io.to(code).emit('player_joined', { nickname: nick, players: playersArray });
         io.to(roomState.adminSocketId).emit('room_update', { players: playersArray, totalJugadores: playersArray.length });
+
+        publishEvent(ROUTING_KEYS.jugadorUnion(code), {
+          sala_id: roomState.sala_id,
+          codigo: code,
+          jugador_id,
+          nickname: nick,
+          timestamp: new Date().toISOString()
+        });
       } catch (err) {
         logger.error('Error al unirse a la sala', { socket_id: socket.id, roomCode, ip: ipSocket, error: err.message, stack: err.stack });
         socket.emit('join_error', { mensaje: 'Error al unirse' });
@@ -187,6 +205,15 @@ function initGameSocket(io) {
         });
 
         io.to(roomCode).emit('start_game', { totalPreguntas: roomState.preguntas.length });
+
+        publishEvent(ROUTING_KEYS.partidaIniciada(roomCode), {
+          sala_id: roomState.sala_id,
+          codigo: roomCode,
+          partida_id: roomState.partida_id,
+          total_jugadores: roomState.players.size,
+          evento: 'iniciada',
+          timestamp: new Date().toISOString()
+        });
       } catch (err) {
         logger.error('Error al iniciar la partida', { roomCode, error: err.message, stack: err.stack });
       }
@@ -289,6 +316,21 @@ function initGameSocket(io) {
 
         socket.emit('answer_result', { esCorrecta: correct, puntosGanados: pts, puntajeTotal: player.puntaje });
 
+        publishEvent(ROUTING_KEYS.respuesta(roomCode), {
+          sala_id: roomState.sala_id,
+          codigo: roomCode,
+          partida_id: roomState.partida_id,
+          jugador_id: player.jugador_id,
+          nickname: player.nickname,
+          pregunta_id: pregunta.id,
+          respuesta_dada: respuesta,
+          es_correcta: correct,
+          puntos_ganados: pts,
+          tiempo_respuesta_ms: t,
+          tiempo_limite_ms: roomState.tiempoLimiteMsActual,
+          timestamp: new Date().toISOString()
+        });
+
         const conectados = [...roomState.players.values()].filter(p => p.conectado).length;
         const respondidos = [...roomState.answeredThisQuestion].filter(jid => [...roomState.players.values()].some(p => p.jugador_id === jid && p.conectado)).length;
 
@@ -380,6 +422,17 @@ async function terminarPartida(io, roomCode, roomState) {
     });
 
     io.to(roomCode).emit('game_finished', { leaderboard: getLeaderboard(roomState) });
+
+    publishEvent(ROUTING_KEYS.partidaTerminada(roomCode), {
+      sala_id: roomState.sala_id,
+      codigo: roomCode,
+      partida_id: roomState.partida_id,
+      total_jugadores: roomState.players.size,
+      ganador: getLeaderboard(roomState)[0]?.nickname || null,
+      evento: 'terminada',
+      timestamp: new Date().toISOString()
+    });
+
     setTimeout(() => roomStates.delete(roomCode), 30000);
   } catch (err) {
     logger.error('Error al terminar la partida', { roomCode, error: err.message, stack: err.stack });
